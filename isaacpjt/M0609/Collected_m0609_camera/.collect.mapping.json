@@ -1,0 +1,59 @@
+{
+    "version": "1.0",
+    "file_records": [
+        {
+            "source_url": "/home/rokey/cobot3_ws/isaacpjt/M0609/Collected_m0609_camera/SubUSDs/materials/Aluminum_Anodized.mdl",
+            "source_hash": "950ba949f63edc864ea1d0617f77f1b420536e96",
+            "target_url": "./SubUSDs/materials/Aluminum_Anodized.mdl",
+            "target_hash": "e6c76c753df14c155f9ccdcb8f8c1350d2267c68"
+        },
+        {
+            "source_url": "/home/rokey/cobot3_ws/isaacpjt/M0609/Collected_m0609_camera/SubUSDs/materials/Aluminum_Cast.mdl",
+            "source_hash": "7cf92f3b4ee37a231026f2df8730180f60fcf020",
+            "target_url": "./SubUSDs/materials/Aluminum_Cast.mdl",
+            "target_hash": "f450551d9914c32aa1e483fa1bfadb27bfda6ecb"
+        },
+        {
+            "source_url": "/home/rokey/cobot3_ws/isaacpjt/M0609/Collected_m0609_camera/SubUSDs/materials/Plastic_ABS.mdl",
+            "source_hash": "f0915ce30122253796e884dcf8ddbf45cfdfa5e5",
+            "target_url": "./SubUSDs/materials/Plastic_ABS.mdl",
+            "target_hash": "3b310883425f02734e834786510d43912b4a7ecc"
+        },
+        {
+            "source_url": "/home/rokey/cobot3_ws/isaacpjt/M0609/Collected_m0609_camera/SubUSDs/textures/Aluminum_Cast_BaseColor.png",
+            "source_hash": "0f1153fb73eacc03eb96a057093426c13eb20e20",
+            "target_url": "./SubUSDs/textures/Aluminum_Cast_BaseColor.png",
+            "target_hash": "13e0d038963688647ff28c7b8c4cbc903ec69e50"
+        },
+        {
+            "source_url": "/home/rokey/cobot3_ws/isaacpjt/M0609/Collected_m0609_camera/SubUSDs/textures/Aluminum_Anodized_BaseColor.png",
+            "source_hash": "89d2870190e75a1f6a793739e6788a88810f99a8",
+            "target_url": "./SubUSDs/textures/Aluminum_Anodized_BaseColor.png",
+            "target_hash": "5d8736ea7e788e889bdc24f6e0b92c89d608b15b"
+        },
+        {
+            "source_url": "/home/rokey/cobot3_ws/isaacpjt/M0609/Collected_m0609_camera/SubUSDs/textures/Aluminum_Cast_ORM.png",
+            "source_hash": "cb27bfc4c4fb8a6b979e465a60e7315c1c14532a",
+            "target_url": "./SubUSDs/textures/Aluminum_Cast_ORM.png",
+            "target_hash": "9cca0dc427c81cd0f22e7394758ce88117185fa3"
+        },
+        {
+            "source_url": "/home/rokey/cobot3_ws/isaacpjt/M0609/Collected_m0609_camera/SubUSDs/textures/Aluminum_Anodized_ORM.png",
+            "source_hash": "b5f8d23792a92cad640d5cd70dde94004600b9b2",
+            "target_url": "./SubUSDs/textures/Aluminum_Anodized_ORM.png",
+            "target_hash": "0af27b1c1f5808b4452acf322de06fa5bec86496"
+        },
+        {
+            "source_url": "/home/rokey/cobot3_ws/isaacpjt/M0609/Collected_m0609_camera/SubUSDs/textures/Aluminum_Cast_N.png",
+            "source_hash": "fa539d6437fc0107d20ce56e483b8c3324b3dab2",
+            "target_url": "./SubUSDs/textures/Aluminum_Cast_N.png",
+            "target_hash": "718dd7740d4cde089ec84d195d35d103d6202534"
+        },
+        {
+            "source_url": "/home/rokey/cobot3_ws/isaacpjt/M0609/Collected_m0609_camera/SubUSDs/textures/Aluminum_Anodized_Normal.png",
+            "source_hash": "ec2f0d00296337bd997d85c5a78b2313def1d386",
+            "target_url": "./SubUSDs/textures/Aluminum_Anodized_Normal.png",
+            "target_hash": "338b6fcae5150badd6e0fc9fda27cc4a23c937db"
+        }
+    ]
+}
