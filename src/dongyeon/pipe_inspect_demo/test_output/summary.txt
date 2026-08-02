@@ -1,0 +1,7 @@
+01_normal: CLEAR area=0 threshold=76.0
+02_hole: DETECTED area=529 threshold=76.0
+03_crack: CLEAR area=0 threshold=76.0
+04_center_dark: CLEAR area=0 threshold=76.0
+05_small_noise: CLEAR area=0 threshold=76.0
+06_shadow_false_positive: CLEAR area=0 threshold=76.0
+07_uneven_lighting: DETECTED area=11169 threshold=76.0
