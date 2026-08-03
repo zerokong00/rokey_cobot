@@ -18,6 +18,7 @@ PhysX 쪽에서 문제가 생기기 쉬우므로, 링크 변환은 전부 m 단�
   PYTHONUNBUFFERED=1 isaac_python robot_articulated.py --headless # 검증만
 """
 
+import os
 import sys
 
 HEADLESS = "--headless" in sys.argv
@@ -37,7 +38,10 @@ HERE = Path(__file__).resolve().parent
 BODY_USD = str(HERE / "body.usd")
 LEG_USD = str(HERE / "leg.usd")
 WHEEL_USD = str(HERE / "wheel.usd")
-OUT_USD = str(HERE / "robot_assembled.usd")
+# 환경변수로 변형 빌드 가능 (기본값 = 기존과 동일):
+#   LEG_PRELOAD_N=9 ROBOT_OUT_USD=robot_assembled_p9.usd isaac_python robot_articulated.py --headless
+# 물속 테스트용 고예압 변형(실물 설계 9N 상당)을 원본 USD 를 건드리지 않고 만들기 위함
+OUT_USD = str(HERE / os.environ.get("ROBOT_OUT_USD", "robot_assembled.usd"))
 
 # ══ STL 실측값 (mm) — 추측 아님, 정점 파싱으로 확인 ═══════════════
 LEG_ANGLES = [0.0, 120.0, 240.0]   # body 보스 3개 실측 각도
@@ -96,7 +100,7 @@ MASS_TOTAL_KG = MASS_BODY_KG + 3 * MASS_LEG_KG + 9 * MASS_WHEEL_KG
 #   테이퍼 진입 저항 = 3다리 * 스프링힘 * 기울기 0.1 = 0.5N + 등판 0.09N = 스톨
 # 예압을 자중보다 낮추면 진입 저항이 추진력의 1/3 이 되고,
 # 좁은 구간 파지 마찰(0.7*3*1.2N = 2.6N)은 여전히 자중의 3배라 충분하다.
-LEG_PRELOAD_N = 0.6
+LEG_PRELOAD_N = float(os.environ.get("LEG_PRELOAD_N", "0.6"))
 LEG_DRIVE_OVERTRAVEL_M = 0.010 * ROBOT_SCALE   # 자유장을 상한보다 이만큼 바깥에
 LEG_DRIVE_TARGET_M = LEG_LIMIT_UPPER_M + LEG_DRIVE_OVERTRAVEL_M
 LEG_DRIVE_STIFFNESS = LEG_PRELOAD_N / LEG_DRIVE_OVERTRAVEL_M
@@ -119,7 +123,10 @@ PIPE_FRICTION = 0.7
 ROBOT = "/World/Robot"
 
 # ── World 를 먼저 만들어 physics scene 을 확보한 뒤 그 스테이지 위에 로봇을 세운다
-world = World(stage_units_in_meters=1.0)
+# BUILD_PHYS_DT: 고예압(고강성) 변형 빌드 시 1/240 필요 — 1/60 에서는 스프링
+# 실측 K 가 설정의 2배로 왜곡돼 검증 게이트에 걸린다 (v3 §13.2 와 같은 근거)
+world = World(stage_units_in_meters=1.0,
+              physics_dt=float(os.environ.get("BUILD_PHYS_DT", str(1.0 / 60.0))))
 stage = world.stage
 UsdGeom.SetStageUpAxis(stage, UsdGeom.Tokens.z)
 
