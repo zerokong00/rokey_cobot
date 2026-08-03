@@ -240,6 +240,13 @@ particleUtils.add_physx_particle_system(
     stage, psys_path,
     particle_contact_offset=PCO,
     fluid_rest_offset=FLUID_REST,
+    # 입자-강체(바퀴·관벽) 간격. 기본값(PCO 에서 자동 산출 ~8mm)이면 바퀴-벽
+    # 접촉부에 낀 입자가 8mm 쿠션이 되어 로봇이 "구슬 베어링" 위에 뜬다 —
+    # p9(예압 9N) 3연속 계측에서 본체 +13~28mm 부상 + 견인 0 실측. 입자는
+    # 정지 마찰이 없어 이 상태면 전진 불가. 간격을 다리 스트로크 여유(±6mm
+    # 상당)보다 얇게 줄여 예압이 입자를 접촉부 밖으로 밀어내게 한다
+    contact_offset=0.004,
+    rest_offset=0.0025,
     max_velocity=MAX_VEL,     # 폭발적 이탈 억제 (fine 모드: 터널링 방지 핵심)
     # 주의: CCD 는 GPU dynamics 에서 미지원(경고 확인). 누수 방지는 입자
     # 크기(8.5~10mm > 메시 틈)가 담당한다 — 6mm 로 줄이면 다시 샌다
