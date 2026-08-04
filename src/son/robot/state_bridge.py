@@ -216,16 +216,15 @@ def attach(art, hz=50.0, robot_path=ROBOT, with_imu=True, imu=None):
 def main():
     world = World(stage_units_in_meters=1.0)
     stage = world.stage
-    usd = SON / "robot" / "robot_2seg.usd"
-    if not usd.is_file():
-        print(f"[중단] {usd} 가 없다. robot/articulate.py 를 먼저 실행할 것.")
-        simulation_app.close()
-        return 1
+    # 로봇은 씬에 직접 조립한다. USD 파일을 거치지 않으므로 낡은 자산으로
+    # 상태를 발행할 위험 자체가 없다(robot/assemble.py 머리말 참조).
+    import sys as _sys
+    _sys.path.insert(0, str(SON / "robot"))
+    import assemble                                       # noqa: E402
 
     from pxr import UsdGeom
     UsdGeom.Xform.Define(stage, "/World")
-    UsdGeom.Xform.Define(stage, ROBOT).GetPrim().GetReferences() \
-        .AddReference(str(usd), "/World/Robot")
+    assemble.build(stage, ROBOT, verbose=False)
 
     art = SingleArticulation(prim_path=ROBOT, name="pipe_robot_state")
     world.scene.add(art)

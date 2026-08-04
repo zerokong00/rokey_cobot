@@ -24,7 +24,8 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 SON = HERE.parents[1]
 
-TARGETS = ["robot/articulate.py", "welder/articulate.py"]
+# 조립(STL 참조)은 robot/assemble.py 로 옮겼다. articulate.py 는 자체검증만 한다.
+TARGETS = ["robot/assemble.py"]   # 조립·STL 참조가 전부 여기로 모였다
 
 
 def category_table(tree):

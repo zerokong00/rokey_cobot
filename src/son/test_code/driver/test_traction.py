@@ -55,9 +55,9 @@ def from_source(path, name, cast=float):
     return cast(eval(m.group(1), {"__builtins__": {}}, {}))
 
 
-FRICTION = from_source("robot/articulate.py", "WHEEL_FRICTION_STATIC")
-PRELOAD_N = from_source("robot/articulate.py", "WHEEL_PRELOAD_N")
-TORQUE_FRACTION = from_source("robot/articulate.py", "WHEEL_TORQUE_FRACTION")
+FRICTION = from_source("robot/assemble.py", "WHEEL_FRICTION_STATIC")
+PRELOAD_N = from_source("robot/assemble.py", "WHEEL_PRELOAD_N")
+TORQUE_FRACTION = from_source("robot/assemble.py", "WHEEL_TORQUE_FRACTION_DESIGN")
 TARGET_SPEED_MPS = 0.05
 
 

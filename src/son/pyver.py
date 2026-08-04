@@ -119,3 +119,25 @@ if __name__ == "__main__":
         except ImportError:
             got = "없음"
         print(f"  {tag:>6}  {mod:<10} {got}")
+
+def hard_exit(app, timeout=5.0):
+    """Isaac 종료 지연을 잘라낸다.
+
+    `simulation_app.close()` 는 "Simulation App Shutting Down" 을 **찍은 뒤**
+    내부에서 매달린다(실측: 계산 11초, 프로세스 5분+ 잔존). close() 뒤에
+    os._exit 을 두어도 close() 가 반환하지 않으므로 도달하지 못한다.
+    그래서 close() 를 데몬 스레드에 맡겨 timeout 만 기다리고 즉시 빠져나온다.
+
+    산출물은 이 시점에 이미 디스크에 있으므로 정리를 건너뛰어도 안전하다.
+    """
+    import os
+    import sys
+    import threading
+    sys.stdout.flush()
+    sys.stderr.flush()
+    if app is not None:
+        threading.Thread(target=app.close, daemon=True).start()
+    threading.Event().wait(timeout)
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(0)

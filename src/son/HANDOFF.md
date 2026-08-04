@@ -37,27 +37,27 @@ IMU·ROS 발행은 전부 스크립트가 실행 중에 만든다.
 **통신은 문제없다** — DDS 가 파이썬 버전과 무관하게 데이터를 나른다. 3.11 쪽이
 발행한 영상을 3.10 쪽 노드가 그대로 받는다.
 
-### 딱 하나 준비가 필요하다
+### 준비 — rclpy 는 Isaac Sim 에 **이미 들어 있다** (2026-08-04 정정)
 
-`camera/rig.py` 와 `robot/state_bridge.py` 가 **rclpy 로 직접 발행**한다.
-Isaac Sim 의 3.11 에는 rclpy 가 없으므로 한 번만 빌드해 둔다:
+`camera/rig.py` 와 `robot/state_bridge.py` 가 rclpy 로 직접 발행한다.
+예전 안내는 `IsaacSim-ros_workspaces` 를 docker 로 빌드하라고 했는데
+**Isaac Sim 5.1 은 3.11 용 rclpy 를 내장하고 있어 빌드가 필요 없다.**
+이 PC 에서 노드 생성·퍼블리셔·shutdown 까지 실행 확인했다.
 
 ```bash
-git clone https://github.com/isaac-sim/IsaacSim-ros_workspaces
-cd IsaacSim-ros_workspaces
-git checkout IsaacSim-5.1.0    # 🚨 main 은 Python 3.12 만 만든다
-./build_ros.sh -d humble -v 22.04
-source build_ws/humble/humble_ws/install/local_setup.bash
-source build_ws/humble/isaac_sim_ros_ws/install/local_setup.bash
-~/isaacsim/isaac-sim.sh        # 같은 터미널에서
+ISAAC=~/dev_ws/isaac_sim/isaacsim/_build/linux-x86_64/release
+BR=$ISAAC/exts/isaacsim.ros2.bridge/humble        # rclpy 165개 패키지 + lib 320개
+export PYTHONPATH="$BR/rclpy:$PYTHONPATH"
+export LD_LIBRARY_PATH="$BR/lib:$LD_LIBRARY_PATH"
+export RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+export PYTHONUNBUFFERED=1
+unset ROS_DISTRO AMENT_PREFIX_PATH     # 시스템 3.10 ROS 가 섞이면 심볼 충돌
+$ISAAC/python.sh <스크립트>
 ```
 
-🚨 **`main` 브랜치를 쓰면 안 된다.** dockerfile 3종이 전부 `*_python_312_minimal`
-이라 Python 3.12 만 만든다. 3.11 과 ABI 가 달라 `import rclpy` 가 실패한다.
-**`IsaacSim-5.1.0` 태그**에 3.11 dockerfile 이 있다. 빌드에 docker 가 필요하다.
-
-**빌드를 안 하고도 되는 것** — `pipe/curve_demo.py` 는 `--cameras` 를 줄 때만
-rclpy 를 쓴다. 카메라 없이 주행 시험만 하려면 ROS 빌드가 필요 없다.
+`_rclpy_pybind11.cpython-311-*.so` 라 ABI 가 정확히 맞는다. docker 도, 빌드도
+필요 없다. **PC1↔PC2 통신 실측 확인** — Isaac 3.11 이 발행한 토픽 6개를 시스템
+ROS 3.10 이 그대로 수신했다(`Float32MultiArray` 포함).
 
 **커스텀 메시지 `pipe_msgs` 는 이 빌드에 안 넣어도 된다.** Isaac 쪽이 발행하는
 것은 전부 표준 메시지(`sensor_msgs`, `std_msgs`)고, `pipe_msgs` 는 3.10 쪽
@@ -68,23 +68,17 @@ rclpy 를 쓴다. 카메라 없이 주행 시험만 하려면 ROS 빌드가 필�
 
 ---
 
-## ⚠ pull 받을 때마다 ②③을 다시 돌릴 것
+## ⚠ USD 파일은 더 이상 없다 (2026-08-04 변경)
 
-`.usd` 는 레포에 없다(`.gitignore`). **스크립트가 실행 중에 만드는 산출물**이라
-그게 맞다 — 미리 구워 배포하면 코드를 고쳐도 그 파일은 안 바뀌어 옛 값으로
-돌아간다(실제로 그 사고가 났다).
+예전에는 `articulate.py` 가 `robot_2seg.usd` 를 굽고 주행 쪽이 그것을 불러 썼다.
+**그 파일 왕복이 사고의 근원이라 없앴다.** 지금은 주행 스크립트가 실행 중에
+`robot/assemble.py` 로 씬에 직접 조립한다.
 
-그래서 **pull 로 형상이나 상수가 바뀌면 USD 를 다시 만들어야 한다.**
+없어진 사고 — 세대가 다른 STL 로 만든 USD 를 조용히 읽는 것, 형상을 고쳐도 낡은
+USD 를 계속 읽어 "수정이 반영 안 된다" 는 오진, 그 우회로 생긴 "다른 디렉터리에서
+만들어 덮어쓰기". **pull 받은 뒤 USD 를 다시 만드는 절차도 필요 없다.**
 
-```bash
-git pull
-PYTHONUNBUFFERED=1 isaac_python robot/articulate.py --headless    # ②
-PYTHONUNBUFFERED=1 isaac_python welder/articulate.py --headless   # ③
-PYTHONUNBUFFERED=1 isaac_python camera/rig.py --save               # ④ GUI
-```
-
-예를 들어 2026-08-04 갱신에서 **휠에 크라운(R50)이 들어가 `wheel.stl` 이
-바뀌었다.** 옛 USD 를 그대로 쓰면 크라운 없는 바퀴로 돈다.
+Isaac 기동도 2회(조립+주행) → **1회**로 줄었다.
 
 ---
 
@@ -97,24 +91,42 @@ python3 tools/build_parts.py
 # ① 깊이 반환 방식 진단  ← 가장 먼저. GUI 필수
 PYTHONUNBUFFERED=1 isaac_python camera/depth_probe.py
 
-# ② 정찰기 물리 조립 (링크 14 / DOF 13)
+# ② 정찰기 조립 자체검증 (자유공간, 링크 14 / DOF 13)   ※ 산출물 없음
 PYTHONUNBUFFERED=1 isaac_python robot/articulate.py --headless
-#    → robot/robot_2seg.usd
 
-# ③ 수리기 물리 조립 (링크 17 / DOF 15, 토치 링 포함)
+# ③ 수리기 조립 자체검증 (링크 17 / DOF 15, 토치 링)
 PYTHONUNBUFFERED=1 isaac_python welder/articulate.py --headless
-#    → welder/welder_2seg.usd
 
-# ④ 카메라 부착 후 저장  ← GUI 필수
-PYTHONUNBUFFERED=1 isaac_python camera/rig.py --save
-#    → robot/robot_2seg_cam.usd   (최종 자산)
-
-# ⑤ 로봇 상태 발행 확인 (휠·관절·IMU)
+# ④ 로봇 상태 발행 확인 (휠·관절·IMU)
 PYTHONUNBUFFERED=1 isaac_python robot/state_bridge.py
 
-# ⑥ 곡관 주행 + 영상 발행  ← GUI 필수
+# ⑤ 관내 주행 (+ --cameras 면 RGB·Depth 발행)  ← 카메라 쓸 때 GUI 필수
+PYTHONUNBUFFERED=1 isaac_python pipe/curve_demo.py --headless --steps 4000
 PYTHONUNBUFFERED=1 isaac_python pipe/curve_demo.py --cameras
 ```
+
+**②③은 이제 선택이다.** 자유공간 자체검증일 뿐이고 주행에 필요한 산출물을
+만들지 않는다. 🚨 **자유공간 통과는 관 내부 동작을 보장하지 않는다** — 휠
+콜라이더가 잘못됐던 동안에도 ②는 계속 통과했고 관내 주행은 0mm 였다.
+
+### 🚨 휠 충돌체는 반드시 실린더 프리미티브
+
+`robot/assemble.py` 가 휠 충돌체를 해석적 원통으로 만든다. **convexHull 로
+바꾸면 주행이 죽는다** — 메시 hull 은 트레드 둘레가 다각형이라 날카로운 에지가
+관벽을 물고, 각속도는 나오는데 관절 위치가 안 쌓이는 스틱슬립 채터가 된다
+(실측 0.0mm). 시각 메시는 크라운 R50 을 그대로 쓰고 충돌체만 원통이다.
+설계 v3 §13.4 도 "휠은 실린더 프리미티브" 다.
+
+### 현재 주행 상태 (2026-08-04 실측, 이 PC)
+
+```
+직관 600mm  완주 → 곡관 진입      이동 517.8mm
+곡관        통과 못 함 (미해결)
+```
+곡관 정체는 휠토크(30 mN·m)·중력 OFF·스태거(10mm)·반경 여유로 각각 시험했으나
+전부 무효였다. 공통 신호는 **암 각도가 신장 상한(+13.78°)에 붙는 것** 이다.
+
+---
 
 ### ①을 건너뛰면 안 되는 이유
 
@@ -136,9 +148,9 @@ PYTHONUNBUFFERED=1 isaac_python pipe/curve_demo.py --cameras
 | 스크립트 | GUI |
 |---|---|
 | `camera/depth_probe.py` | **필수** |
-| `camera/rig.py --save` | **필수** — 프레임 0이면 저장을 거부하도록 해뒀다 |
-| `pipe/curve_demo.py --cameras` | **필수** |
-| `robot/articulate.py`, `welder/articulate.py` | 불필요 |
+| `camera/rig.py` (단독 확인) | **필수** |
+| `pipe/curve_demo.py --cameras` | **필수** (카메라 없이 주행만이면 불필요) |
+| `robot/articulate.py`, `welder/articulate.py` | 불필요 (자체검증만) |
 | `robot/state_bridge.py` | 불필요 (카메라를 안 쓴다) |
 
 ---
@@ -149,7 +161,8 @@ PYTHONUNBUFFERED=1 isaac_python pipe/curve_demo.py --cameras
 son/
 ├─ spec/parts_meta.json     치수·한계값 단일 출처. 전 스크립트가 읽는다
 ├─ tools/build_parts.py     STL 전부 생성
-├─ robot/                   meshes + articulate.py + state_bridge.py
+├─ robot/                   meshes + **assemble.py**(조립 한 벌) +
+│                           articulate.py(자체검증) + state_bridge.py
 ├─ camera/                  meshes + config + rig.py + depth_probe.py
 ├─ pipe/                    meshes(직관·SR곡관·**균열판**·결함·비드) + curve_demo.py
 ├─ welder/                  meshes(링·로드·팁) + weld.py + audit.py + articulate.py

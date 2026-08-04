@@ -110,6 +110,8 @@ CHECKS = [
 # 소스에서 정규식으로 뽑아 문서값과 맞춘다. 실행하지 않는다.
 
 PHYS_CHECKS = [
+    # 물리 스텝은 World 를 만드는 쪽이 정한다. assemble.py 는 조립만 하고
+    # World 를 만들지 않으므로 대상에서 뺀다.
     ("물리 스텝", "물리 스텝            : 1/240 이상 (불안정 시 1/500)",
      ["pipe/curve_demo.py", "robot/articulate.py", "welder/articulate.py"],
      r"PHYSICS_DT\s*=\s*1\.0\s*/\s*([\d.]+)",
@@ -119,32 +121,32 @@ PHYS_CHECKS = [
      "지금은 1/60 으로도 될 수 있다. **Isaac Sim 에서 재측정 후 결정할 것** — "
      "1/60 에서 0mm 면 설계값으로 복귀한다"),
     ("솔버 position", "솔버 반복 (position) : 32",
-     ["robot/articulate.py", "welder/articulate.py"],
+     ["robot/assemble.py"],
      r"CreateSolverPositionIterationCountAttr\((\d+)\)",
      lambda v: float(v) >= 32, "32 이상", None),
     ("솔버 velocity", "솔버 반복 (velocity) : 4",
-     ["robot/articulate.py", "welder/articulate.py"],
+     ["robot/assemble.py"],
      r"CreateSolverVelocityIterationCountAttr\((\d+)\)",
      lambda v: float(v) >= 4, "4 이상", None),
     ("contactOffset", "contactOffset       : 0.0005 m",
-     ["pipe/curve_demo.py", "robot/articulate.py"],
+     ["pipe/curve_demo.py", "robot/assemble.py"],
      r"CONTACT_OFFSET\s*=\s*([\d.]+)",
      lambda v: abs(float(v) - 0.0005) < 1e-9, "0.0005", None),
     ("정찰기 정지마찰", "friction_static   : 0.30",
-     ["robot/articulate.py"],
+     ["robot/assemble.py"],
      r"WHEEL_FRICTION_STATIC\s*=\s*([\d.]+)",
      lambda v: abs(float(v) - 0.30) < 1e-9, "0.30", None),
     ("정찰기 운동마찰", "friction_dynamic  : 0.25",
-     ["robot/articulate.py"],
+     ["robot/assemble.py"],
      r"WHEEL_FRICTION_DYNAMIC\s*=\s*([\d.]+)",
      lambda v: abs(float(v) - 0.25) < 1e-9, "0.25", None),
     ("수리기 정지마찰", "friction_static   : 0.40",
-     ["welder/articulate.py"],
-     r"WHEEL_FRICTION_STATIC\s*=\s*([\d.]+)",
+     ["robot/assemble.py"],
+     r"WHEEL_FRICTION_DRAINED_STATIC\s*=\s*([\d.]+)",
      lambda v: abs(float(v) - 0.40) < 1e-9, "0.40", None),
     ("수리기 운동마찰", "friction_dynamic  : 0.35",
-     ["welder/articulate.py"],
-     r"WHEEL_FRICTION_DYNAMIC\s*=\s*([\d.]+)",
+     ["robot/assemble.py"],
+     r"WHEEL_FRICTION_DRAINED_DYNAMIC\s*=\s*([\d.]+)",
      lambda v: abs(float(v) - 0.35) < 1e-9, "0.35", None),
 ]
 

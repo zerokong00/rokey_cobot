@@ -32,31 +32,32 @@ Depth 는 물리 센서가 아니라 **광선 추적 결과**다. 스테레오 �
 
 ⚠ headless 에서는 카메라 프레임이 발행되지 않는다. 반드시 GUI 로 실행할 것.
 
-두 가지 모드
-  --save 없음 : 카메라를 만들고 그 자리에서 ROS 2 로 계속 발행한다.
-  --save      : 카메라를 붙인 상태를 robot_2seg_cam.usd 로 저장하고 끝낸다.
-                이후 pipe_curve_demo.py 가 그 USD 를 불러 쓰면 주행하면서
-                영상도 같이 나온다. 카메라 프림은 저장되지만 annotator 와
-                render product 는 런타임 자원이라 저장되지 않는다.
-                불러 쓰는 쪽에서 attach_existing() 으로 다시 붙인다.
+⚠ `--save` 는 제거됐다. 예전에는 카메라를 붙인 상태를 `robot_2seg_cam.usd` 로
+구워 두고 주행 쪽이 그것을 불러 썼는데, **그 파일 왕복이 세대 불일치·낡은 자산
+사고의 근원**이었다(robot/assemble.py 머리말). 지금은 파일이 없다.
+
+쓰는 법 (두 진입점)
+  build_cameras(stage, robot)  조립 직후·`world.reset()` **전에** 카메라를 만든다.
+                               주행 스크립트가 부른다.
+  attach_existing(robot)       이미 만들어진 카메라 프림에 annotator 를 다시 붙인다.
+                               annotator·render product 는 런타임 자원이라
+                               `reset()` 뒤에 붙여야 한다.
 
 자산 관계
-  build_robot_parts.py  -> parts/*.stl
-  robot_articulated.py  -> robot_2seg.usd        (물리)
-  camera_rig.py --save  -> robot_2seg_cam.usd    (물리 + 카메라)  <- 최종 자산
-  pipe_curve_demo.py    -> 그것을 불러 주행
+  tools/build_parts.py     -> */meshes/*.stl + spec/parts_meta.json
+  robot/assemble.py        -> 씬에 직접 조립 (파일 산출물 없음)
+  pipe/curve_demo.py       -> 조립 + 카메라 + 주행 (Isaac 기동 1회)
 
 실행:
-  PYTHONUNBUFFERED=1 isaac_python camera_rig.py --save
-  PYTHONUNBUFFERED=1 isaac_python camera_rig.py
-  PYTHONUNBUFFERED=1 isaac_python camera_rig.py --robot /World/Robot --ns /scout
+  PYTHONUNBUFFERED=1 isaac_python camera/rig.py                    # 단독 확인 (GUI)
+  PYTHONUNBUFFERED=1 isaac_python camera/rig.py --robot /World/Robot --ns /scout
 """
 
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from pyver import require_isaac
+from pyver import hard_exit, require_isaac
 
 require_isaac(__file__, needs_rclpy=True)
 
@@ -99,8 +100,6 @@ from sensor_msgs.msg import CameraInfo, CompressedImage, Image
 
 HERE = Path(__file__).resolve().parent
 SON = HERE.parent
-ROBOT_USD = SON / "robot" / "robot_2seg.usd"
-OUT_USD = SON / "robot" / "robot_2seg_cam.usd"
 CFG = yaml.safe_load((HERE / "config" / "camera.yaml").read_text())
 CAM = CFG["camera"]
 LIGHT = CFG["light"]
@@ -233,11 +232,23 @@ def attach_annotators(rig):
     return rig
 
 
-def attach_existing(robot_path=ROBOT):
-    """이미 카메라가 들어 있는 USD 를 불러 쓸 때 쓰는 진입점.
+def build_cameras(stage, robot_path=ROBOT):
+    """씬에 카메라를 만들어 붙인다. 조립 직후·`world.reset()` 전에 부를 것.
 
-    pipe_curve_demo.py 처럼 robot_2seg_cam.usd 를 reference 한 쪽에서
-    호출하면 카메라 프림을 찾아 annotator 를 다시 붙여 준다.
+    예전에는 `rig.py --save` 가 `robot_2seg_cam.usd` 를 구워 두고 주행 쪽이
+    그것을 불러 썼다. 그 파일 왕복이 사고의 근원이라 없앴다 —
+    이제 주행 스크립트가 조립 후 이 함수를 부른다.
+    """
+    return [make_camera(stage, "front_camera", CAM["front"]),
+            make_camera(stage, "rear_camera", CAM["rear"])]
+
+
+def attach_existing(robot_path=ROBOT):
+    """이미 만들어진 카메라 프림에 annotator 를 붙인다.
+
+    `build_cameras()` 로 카메라를 만든 뒤 `world.reset()` 을 지나고 나서
+    호출한다 — annotator 와 render product 는 런타임 자원이라 reset 전에
+    붙여 두면 살아남지 않는다.
     """
     rigs = []
     for name, spec in (("front_camera", CAM["front"]),
@@ -346,17 +357,13 @@ def main():
     UsdGeom.SetStageUpAxis(stage, UsdGeom.Tokens.z)
     UsdGeom.Xform.Define(stage, "/World")
 
-    if ROBOT_USD.is_file():
-        UsdGeom.Xform.Define(stage, ROBOT).GetPrim().GetReferences() \
-            .AddReference(str(ROBOT_USD), "/World/Robot")
-    else:
-        print(f"[참고] {ROBOT_USD} 없음 — 빈 Xform 에 카메라만 붙인다")
-        UsdGeom.Xform.Define(stage, ROBOT)
-        for link in ("body_front", "body_rear"):
-            UsdGeom.Xform.Define(stage, f"{ROBOT}/{link}")
+    # 로봇은 씬에 직접 조립한다(robot/assemble.py). USD 파일을 거치지 않으므로
+    # "로봇 없는 cam USD" 나 "낡은 로봇이 든 cam USD" 같은 사고가 성립하지 않는다.
+    sys.path.insert(0, str(SON / "robot"))
+    import assemble                                   # noqa: E402
+    assemble.build(stage, ROBOT, verbose=False)
 
-    rigs = [make_camera(stage, "front_camera", CAM["front"]),
-            make_camera(stage, "rear_camera", CAM["rear"])]
+    rigs = build_cameras(stage)
     topics = topic_sets()
 
     world.reset()
@@ -405,34 +412,14 @@ def main():
           f"({F_PX:.1f} / {PPX:.0f} / {PPY:.0f})")
 
     # ── 저장 모드 ────────────────────────────────────────────────
+    # --save 는 제거됐다. 예전에는 여기서 robot_2seg_cam.usd 를 구웠는데,
+    # 그 파일 왕복이 세대 불일치·낡은 자산 사고의 근원이었다. 이제 주행
+    # 스크립트가 조립 직후 build_cameras() 를 부른다.
     if SAVE:
-        if not ok:
-            print("\n[중단] 프레임을 못 받은 상태로는 저장하지 않는다.")
-            print("       headless 여부와 GUI 렌더를 확인할 것.\n")
-            simulation_app.close()
-            return 1
-        world.stop()
-        # defaultPrim 이 없으면 다른 스테이지에서 이 USD 를 reference 할 때
-        # 경로가 안 풀린다.
-        stage.SetDefaultPrim(stage.GetPrimAtPath("/World"))
-        # 🚨 stage.Export() 를 쓰면 안 된다. 그것은 합성 결과를 **단일 레이어로
-        # 구워버려** robot_2seg.usd 로의 참조가 사라진다. 그러면
-        #   articulate.py 를 다시 돌려 조인트 드라이브를 바꿔도
-        #   curve_demo.py 는 옛날에 구워진 이 파일을 읽어 아무것도 안 바뀐다.
-        # 2026-08-04 실기에서 "센터링 0.01→0.3 으로 바꿨는데 궤적이 한 자리도
-        # 안 변한다" 는 현상이 이것이다. 물리 dt·마찰은 curve_demo.py 안에서
-        # 직접 걸므로 반영되어, 드라이브만 안 먹는 것처럼 보였다.
-        # 루트 레이어만 내보내면 참조가 살아 있어 원본 변경이 흘러든다.
-        stage.GetRootLayer().Export(str(OUT_USD))
-        print("=" * 76)
-        print(f"\n저장 완료: {OUT_USD}")
-        print("  포함  : 로봇 물리 + 카메라 프림 + 조명 + 하우징")
-        print("  미포함: annotator / render product (런타임 자원)")
-        print("          → 불러 쓰는 쪽에서 camera_rig.attach_existing() 호출")
-        print(f"  ※ robot_2seg.usd 를 절대경로로 reference 한다. 폴더를 옮기면")
-        print(f"    robot_articulated.py 부터 다시 실행할 것.\n")
-        simulation_app.close()
-        return 0
+        print("[중단] --save 는 제거됐다. USD 파일 왕복을 없앴다.")
+        print("       주행 스크립트가 조립 후 rig.build_cameras() 를 부른다:")
+        print("       PYTHONUNBUFFERED=1 isaac_python pipe/curve_demo.py --cameras")
+        hard_exit(simulation_app)
 
     # ── 발행 모드 ────────────────────────────────────────────────
     rclpy.init()
