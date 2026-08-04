@@ -42,9 +42,11 @@ ELBOW = "--elbow" in sys.argv
 # 포함)을 그대로 쓴다. 파티클은 GPU 물리 전용이라 휠 드라이브 목표를
 # reset "전에" USD 에 기록한다 (GPU 는 시작 후 USD 드라이브 변경 무시)
 WATER = "--water" in sys.argv
-# 엘보+물: 유속장(wind)은 전역 단방향이라 굽은 경로에는 못 쓴다 — 엘보
-# 코스는 고인 물(유속 0)로 채우고, 로봇이 헤치고 지나가는 물결로 표현한다.
-# 굽힘이 수평(x-y)이라 수위 z=일정 이 코스 전체에서 성립한다
+# 엘보+물(--elbow --water): 임무 조건 그대로 — 직관+곡관이 이어진 코스 전체가
+# 물로 차 있고, 그 물이 코스를 따라 흐르며, 로봇은 그 흐름을 거슬러 주파한다.
+# 유속장(wind)은 전역 단방향이라 굽은 경로에 못 쓰므로, recycle_particles()
+# 에서 입자마다 경로 접선(path_dist_tangent)을 구해 상류→하류로 속도를 끌어
+# 당긴다. 굽힘이 수평(x-y)이라 수위 z=일정 이 코스 전체에서 성립한다
 # --no-pipe: 배관 없이 예압만 — 암 조인트 부호 검증. 부호가 맞으면 정착 시
 # 암이 신장 한계 +14.9°, 휠 중심 반경 46mm(자유 최대)로 가야 한다
 NO_PIPE = "--no-pipe" in sys.argv
@@ -101,6 +103,11 @@ CENTER_STIFF = 0.01 * np.pi / 180.0
 # 0.0096 N·m 로는 못 잡음). 댐퍼는 곡관 통과(준정적 굽힘)는 방해하지 않으면서
 # 접힘 속도에만 저항 — 실물 반영 검토 대상 설계 제안
 CENTER_DAMP = 0.05 * np.pi / 180.0     # 0.05 N·m·s/rad
+if ELBOW:
+    # 10~12차 스윕 결론: 0.01(v3)은 직진에서 잭나이프, 1.0 은 엘보에서 쐐기.
+    # 0.3 N·m/rad + 댐퍼 0.05 + 휠 토크 30 mN·m 가 직진·곡관 겸용 확정값 —
+    # 코스 주행이 기본 목적인 --elbow 에서는 이 조합을 기본값으로 쓴다
+    CENTER_STIFF = 0.3 * np.pi / 180.0
 if STIFF_JOINT:
     CENTER_STIFF = 1.0 * np.pi / 180.0
 # --spring K: 센터링 스프링(N·m/rad) 직접 지정 — 직진 안정 vs 곡관 통과 절충
@@ -108,6 +115,11 @@ if STIFF_JOINT:
 # 직진 잭나이프. 중간값을 찾는다
 if "--spring" in sys.argv:
     CENTER_STIFF = float(sys.argv[sys.argv.index("--spring") + 1]) * np.pi / 180.0
+# --damp D: 요 댐퍼(N·m·s/rad). 14차 착안: 잭나이프는 빠른 발산, 곡관 굽힘은
+# 준정적 — 스프링은 각도에만 반응해 둘을 못 가르지만 댐퍼는 속도에만 반응하므로
+# "빠르게 접히는 건 막고 천천히 꺾이는 건 허용"이 원리적으로 가능하다
+if "--damp" in sys.argv:
+    CENTER_DAMP = float(sys.argv[sys.argv.index("--damp") + 1]) * np.pi / 180.0
 
 # ── 질량 (합 ~500g, v3 건조 질량) ──
 MASS_BODY = 0.18
@@ -125,6 +137,8 @@ WHEEL_TARGET_DEG_S = -np.degrees(0.050 / WHEEL_R)         # -286 deg/s = +X 전�
 # 못 잡음). 여유를 남기면 같은 마찰이 조향 강성으로 작동한다. 직관 평지 구름
 # 저항은 mN·m 수준이라 15 mN·m 로도 스키드 없이 충분
 WHEEL_MAX_TORQUE = 0.015
+if ELBOW:
+    WHEEL_MAX_TORQUE = 0.030   # 곡관에선 스프링 복원 토크를 이겨야 한다 (12차)
 # --torque T: 휠 토크 상한(N·m) 지정. 11차: 엘보에서는 스프링 복원 토크를
 # 이기며 전진해야 해서 15 mN·m 로는 정체 — 스프링으로 직진이 안정화된 뒤에는
 # 토크를 올려도 잭나이프가 재발하지 않는지가 관건
@@ -134,21 +148,45 @@ WHEEL_DAMP = WHEEL_MAX_TORQUE / 60.0                      # 60 deg/s 오차서 �
 
 FRICTION = (0.30, 0.25) if WATER else (0.40, 0.35)   # 만관(정찰)/배수(수리)
 PHYS_DT = 1.0 / 240.0                 # v3 §13.2
-SETTLE_STEPS = 480
-DRIVE_STEPS = 4800                    # 20 s
-REPORT_EVERY = 480
+RENDER_DT = 1.0 / 60.0                # World 기본값
+
+# ── 루프 1회의 시뮬 경과시간 (GUI/headless 가 다르다) ──
+# isaacsim.core.api SimulationContext: set_simulation_dt 가
+#   substeps = max(int(rendering_dt / physics_dt), 1) = 4
+# 로 잡고, step(render=True) 는 _app.update() 로 렌더 1프레임 = 4 물리 서브스텝을
+# 돌린다. step(render=False) 는 물리 1스텝. 즉 같은 "스텝 수"라도 GUI 는
+# headless 의 4배 시간이 흐른다. 14차: 이 차이를 dt 로 반영 안 해서 GUI 슬립률이
+# 4배(0.58 → 2.33)로 찍혔다. 시간 기준 값은 전부 STEP_DT 로 환산할 것
+STEP_DT = PHYS_DT if HEADLESS else RENDER_DT
+
+
+def _steps(sec):
+    return max(1, int(round(sec / STEP_DT)))
+
+
+SETTLE_SEC = 2.0
+DRIVE_SEC = 20.0
+REPORT_SEC = 2.0
 START_X = -0.20
+STOP_Y_ELBOW = 0.55                   # 출구 직관에서 주파 판정하는 y
 if ELBOW:
     # 전체 코스: 직관 시작점부터 550mm 직진 → 엘보 90° → 출구 직관 450mm.
     # 실제 임무 조건대로 직선·곡선이 이어진 경로를 한 번에 통과해야 한다
     START_X = -0.25
-    DRIVE_STEPS = 16800               # 70 s (코스 ~1.15m)
-    REPORT_EVERY = 1200
+    DRIVE_SEC = 70.0                  # 코스 ~1.15m
+    REPORT_SEC = 5.0
 if WATER:
-    SETTLE_STEPS = 1440               # 6 s — 물 유입 서지가 가라앉을 시간
-    DRIVE_STEPS = 12000 if not ELBOW else 24000   # 물 저항 감속 감안
-    REPORT_EVERY = 1200
-    FLOW_V = -0.10 if not ELBOW else 0.0   # 엘보 코스는 고인 물 (전역 유속 불가)
+    SETTLE_SEC = 6.0                  # 물 유입 서지가 가라앉을 시간
+    DRIVE_SEC = 50.0 if not ELBOW else 100.0   # 물 저항 감속 감안
+    REPORT_SEC = 5.0
+    # 14차 실측: 물 모드는 set_offsets 를 건너뛰어(GPU 접촉 소실 회피) 엔진
+    # 기본 contactOffset 0.02m 가 쓰인다. START_X=-0.25 면 후방 3휠이 직관
+    # 입구(x=-0.30) 밖 -335mm 에 놓여 관 끝 링(r50~57)과 20mm 범위에서 겹치고,
+    # 그 관통 해소 임펄스로 로봇이 -X 로 1.66 m/s 사출 → 이후 자유낙하
+    # (본체 -178m). 후방 휠 뒷면이 관 안에 들어오는 -0.20 으로 당긴다
+    START_X = max(START_X, -0.20)
+    FLOW_V = -0.10                    # 경로 접선 기준 유속(상류 방향, 로봇 진행 반대)
+    FLOW_BLEND = 0.20                 # 입자 속도를 유동 목표로 끌어당기는 계수
     W_SPACING = 0.009
     W_PCO = 0.008
     W_FLUID_REST = 0.0048
@@ -157,8 +195,64 @@ if WATER:
     W_X = (-0.28, 0.28)
     RECYCLE_OUT_X = -0.28             # 하류 이탈 → 상류 재투입 (러닝머신)
     RECYCLE_IN_X = (0.22, 0.29)
-    RECYCLE_EVERY = 4
+    # 유동 강제 주기는 "시간" 기준 1/60 s — GUI 에서 스텝 수로 고정하면 4배
+    # 뜸해져 유속이 55 → 44 mm/s 로 떨어진다 (14차 GUI 실측)
+    RECYCLE_EVERY = _steps(1.0 / 60.0)
     STOP_X_WATER = 0.15               # 재투입 지점 앞에서 정지
+    if ELBOW:
+        # 엘보 코스의 "하류"는 직관 입구(x=-0.30), "상류"는 출구 직관 끝.
+        # 물은 출구 직관 위쪽에서 투입돼 굽은 경로를 타고 입구로 빠져나가고,
+        # 로봇은 그 흐름을 거슬러 올라간다 (정찰 임무 조건)
+        RECYCLE_OUT_X = -0.30
+        RECYCLE_IN_Y = (0.60, 0.65)   # 출구 직관 상단(수면 위)에서 낙하 합류
+        # 로봇 주파 판정선(0.55)은 재투입 지점보다 하류 — 낙하 합류 물살이
+        # 결승선의 로봇을 때리지 않게 한다
+
+SETTLE_STEPS = _steps(SETTLE_SEC)
+DRIVE_STEPS = _steps(DRIVE_SEC)
+REPORT_EVERY = _steps(REPORT_SEC)
+BEND_EVERY = _steps(0.2)              # 관절 굽힘 최대값 샘플링 주기
+
+# ── 엘보 코스 중심선: 직선(-0.30~0.30, y=0) → 원호(중심 0.30,0.10 / r0.10)
+#    → 직선(x=0.40, y=0.10~0.70). 물 채우기와 유동장이 같은 기하를 쓴다 ──
+ARC_C = (0.300, 0.100)
+ARC_R = 0.100
+
+
+def path_dist_tangent(px, py):
+    """xy 점 배열 → (중심선까지 xy 거리, 접선 x, 접선 y). 접선은 로봇 진행 방향."""
+    d1 = np.hypot(px - np.clip(px, -0.30, 0.30), py)
+    ang = np.clip(np.arctan2(py - ARC_C[1], px - ARC_C[0]), -np.pi / 2, 0.0)
+    d2 = np.hypot(px - (ARC_C[0] + ARC_R * np.cos(ang)),
+                  py - (ARC_C[1] + ARC_R * np.sin(ang)))
+    d3 = np.hypot(px - 0.40, py - np.clip(py, 0.10, 0.70))
+    d = np.stack([d1, d2, d3])
+    which = np.argmin(d, axis=0)
+    tx = np.where(which == 0, 1.0, np.where(which == 1, -np.sin(ang), 0.0))
+    ty = np.where(which == 0, 0.0, np.where(which == 1, np.cos(ang), 1.0))
+    return d.min(axis=0), tx, ty
+
+
+def path_s(px, py):
+    """코스 중심선 진행거리(m). 직관 입구 x=-0.30 이 0, 굽힘·출구 직관까지 이어짐.
+
+    엘보 코스에서 x 변위는 주행량이 아니다(굽고 나면 x 가 멎는다) — 슬립률은
+    이 곡선거리로 재야 의미가 있다."""
+    px = np.atleast_1d(np.asarray(px, dtype=float))
+    py = np.atleast_1d(np.asarray(py, dtype=float))
+    ang = np.clip(np.arctan2(py - ARC_C[1], px - ARC_C[0]), -np.pi / 2, 0.0)
+    d1 = np.hypot(px - np.clip(px, -0.30, 0.30), py)
+    d2 = np.hypot(px - (ARC_C[0] + ARC_R * np.cos(ang)),
+                  py - (ARC_C[1] + ARC_R * np.sin(ang)))
+    d3 = np.hypot(px - 0.40, py - np.clip(py, 0.10, 0.70))
+    which = np.argmin(np.stack([d1, d2, d3]), axis=0)
+    s_arc0 = 0.60                                   # 직관 구간 길이
+    s = np.where(which == 0, np.clip(px, -0.30, 0.30) + 0.30,
+                 np.where(which == 1, s_arc0 + ARC_R * (ang + np.pi / 2),
+                          s_arc0 + ARC_R * np.pi / 2
+                          + (np.clip(py, 0.10, 0.70) - 0.10)))
+    return float(s[0]) if s.size == 1 else s
+
 
 world = World(stage_units_in_meters=1.0, physics_dt=PHYS_DT)
 stage = world.stage
@@ -476,7 +570,9 @@ if WATER:
         contact_offset=0.004,          # 입자-강체 간격 — 미지정 시 로봇 부상 함정
         rest_offset=0.0025,
         max_velocity=5.0,
-        wind=Gf.Vec3f(FLOW_V, 0.0, 0.0),
+        # 전역 wind 는 단방향이라 굽은 경로에 못 쓴다 — 엘보 코스는 0 으로 두고
+        # recycle_particles() 에서 입자별 경로 접선 방향으로 속도를 끌어당긴다
+        wind=Gf.Vec3f(0.0, 0.0, 0.0) if ELBOW else Gf.Vec3f(FLOW_V, 0.0, 0.0),
     )
     # isosurface 수면 렌더 (KB: 메모리 누수 이슈 — 짧은 데모 세션 전용)
     particleUtils.add_physx_particle_isosurface(
@@ -506,24 +602,24 @@ if WATER:
         materialPurpose="physics")
 
     _wpos = []
+    _wvel_elbow = []
     if ELBOW:
         # 코스 전체(직관→엘보→출구 직관)를 경로 중심선 거리로 채운다.
-        # 경로: 직선 (-0.28,0)~(0.30,0) + 원호 중심(0.30,0.10) r0.10 + 직선
-        # (0.40,0.10)~(0.40,0.62). 굽힘이 수평이라 수위 z 는 전 구간 동일
+        # 경로: 직선 (-0.30,0)~(0.30,0) + 원호 중심(0.30,0.10) r0.10 + 직선
+        # (0.40,0.10)~(0.40,0.70). 굽힘이 수평이라 수위 z 는 전 구간 동일
         gx = np.arange(-0.28, 0.47, W_SPACING)
-        gy = np.arange(-0.05, 0.63, W_SPACING)
+        gy = np.arange(-0.05, 0.66, W_SPACING)
         gz = np.arange(-W_R_MAX, W_LEVEL_Z + 1e-9, W_SPACING)
         X, Y, Z = np.meshgrid(gx, gy, gz, indexing="ij")
-        d1 = np.hypot(X - np.clip(X, -0.28, 0.30), Y)
-        ang = np.clip(np.arctan2(Y - 0.10, X - 0.30), -np.pi / 2, 0.0)
-        d2 = np.hypot(X - (0.30 + 0.10 * np.cos(ang)),
-                      Y - (0.10 + 0.10 * np.sin(ang)))
-        d3 = np.hypot(X - 0.40, Y - np.clip(Y, 0.10, 0.62))
-        dxy = np.minimum(np.minimum(d1, d2), d3)
+        dxy, TX, TY = path_dist_tangent(X, Y)
         inside = (dxy ** 2 + Z ** 2 <= W_R_MAX ** 2)
         inside &= ~((np.abs(X - START_X) < 0.10) & (np.abs(Y) < 0.06))
-        for x, y, z in zip(X[inside], Y[inside], Z[inside]):
+        for x, y, z, tx, ty in zip(X[inside], Y[inside], Z[inside],
+                                   TX[inside], TY[inside]):
             _wpos.append(Gf.Vec3f(float(x), float(y), float(z)))
+            # 초기 속도도 경로 접선의 반대(상류→하류 = 로봇 진행 반대)로
+            _wvel_elbow.append(Gf.Vec3f(float(-tx * abs(FLOW_V)),
+                                        float(-ty * abs(FLOW_V)), 0.0))
     else:
         for x in np.arange(W_X[0], W_X[1], W_SPACING):
             if abs(x - START_X) < 0.10:   # 로봇 자리 비움 — 정착 중 흘러들어온다
@@ -532,7 +628,7 @@ if WATER:
                 for z in np.arange(-W_R_MAX, W_LEVEL_Z + 1e-9, W_SPACING):
                     if y * y + z * z <= W_R_MAX * W_R_MAX:
                         _wpos.append(Gf.Vec3f(float(x), float(y), float(z)))
-    _wvel = [Gf.Vec3f(FLOW_V, 0.0, 0.0)] * len(_wpos)
+    _wvel = _wvel_elbow if ELBOW else [Gf.Vec3f(FLOW_V, 0.0, 0.0)] * len(_wpos)
     _winst_prim = particleUtils.add_physx_particleset_pointinstancer(
         stage, Sdf.Path("/World/WaterParticles"),
         Vt.Vec3fArray(_wpos), Vt.Vec3fArray(_wvel),
@@ -547,22 +643,48 @@ if WATER:
 
 _rng_flow = np.random.default_rng(3)
 _recycled = 0
+_flow_speed_now = 0.0        # 최근 유동 실측(경로 접선 성분 평균, m/s)
 
 
 def recycle_particles():
-    """하류로 나간 입자를 상류로 재투입 — 고정 입자 수로 연속 흐름 표현."""
-    global _recycled
+    """하류로 나간 입자를 상류로 재투입 — 고정 입자 수로 연속 흐름 표현.
+
+    엘보 코스는 여기서 유동장까지 만든다: 전역 wind 는 단방향이라 굽은 경로에
+    쓸 수 없으므로 입자마다 경로 접선을 구해 상류→하류 방향으로 속도를
+    끌어당긴다(계수 FLOW_BLEND). 직관 코스는 기존대로 wind 가 흐름을 맡고
+    여기서는 이탈 입자 재투입만 한다.
+    """
+    global _recycled, _flow_speed_now
     pts = np.array(water_instancer.GetPositionsAttr().Get())
-    r2 = pts[:, 1] ** 2 + pts[:, 2] ** 2
-    mask = ((pts[:, 0] < RECYCLE_OUT_X) | (pts[:, 0] > 0.31) | (r2 > 0.055 ** 2))
-    n = int(mask.sum())
-    if n == 0:
-        return
-    pts[mask, 0] = _rng_flow.uniform(RECYCLE_IN_X[0], RECYCLE_IN_X[1], n)
-    pts[mask, 1] = _rng_flow.uniform(-0.02, 0.02, n)
-    pts[mask, 2] = _rng_flow.uniform(W_LEVEL_Z, W_LEVEL_Z + 0.015, n)
     vels = np.array(water_instancer.GetVelocitiesAttr().Get())
-    vels[mask] = (FLOW_V, 0.0, -0.2)   # 물 위에서 떨어뜨려 합류 (압력 폭발 방지)
+    if ELBOW:
+        d, tx, ty = path_dist_tangent(pts[:, 0], pts[:, 1])
+        spd = abs(FLOW_V)
+        # 로봇 진행 방향(접선)의 반대 = 상류에서 하류로 흐른다
+        vels[:, 0] += FLOW_BLEND * (-tx * spd - vels[:, 0])
+        vels[:, 1] += FLOW_BLEND * (-ty * spd - vels[:, 1])
+        _flow_speed_now = float(np.mean(-(vels[:, 0] * tx + vels[:, 1] * ty)))
+        # 이탈: 하류 끝(직관 입구) 통과 · 관벽 관통 · 상류 끝 초과
+        off = np.hypot(d, pts[:, 2])
+        mask = ((pts[:, 0] < RECYCLE_OUT_X) | (off > 0.055)
+                | (pts[:, 1] > RECYCLE_IN_Y[1] + 0.02))
+        n = int(mask.sum())
+        if n:
+            pts[mask, 0] = 0.40 + _rng_flow.uniform(-0.02, 0.02, n)
+            pts[mask, 1] = _rng_flow.uniform(*RECYCLE_IN_Y, n)
+            pts[mask, 2] = _rng_flow.uniform(W_LEVEL_Z, W_LEVEL_Z + 0.015, n)
+            vels[mask] = (0.0, -spd, -0.2)   # 수면 위에서 낙하 합류
+    else:
+        r2 = pts[:, 1] ** 2 + pts[:, 2] ** 2
+        mask = ((pts[:, 0] < RECYCLE_OUT_X) | (pts[:, 0] > 0.31)
+                | (r2 > 0.055 ** 2))
+        n = int(mask.sum())
+        if n == 0:
+            return
+        pts[mask, 0] = _rng_flow.uniform(RECYCLE_IN_X[0], RECYCLE_IN_X[1], n)
+        pts[mask, 1] = _rng_flow.uniform(-0.02, 0.02, n)
+        pts[mask, 2] = _rng_flow.uniform(W_LEVEL_Z, W_LEVEL_Z + 0.015, n)
+        vels[mask] = (FLOW_V, 0.0, -0.2)   # 물 위에서 떨어뜨려 합류
     water_instancer.GetPositionsAttr().Set(
         Vt.Vec3fArray.FromNumpy(pts.astype(np.float32)))
     water_instancer.GetVelocitiesAttr().Set(
@@ -587,7 +709,15 @@ def body_roll_deg():
     raw = np.degrees(np.arctan2(2 * (w * x + y * z),
                                 1 - 2 * (x * x + y * y)))
     return raw - 90.0                     # 링크 프레임에 Rx90 조립 회전 포함
-dt = world.get_physics_dt()
+
+
+# 루프 1회의 시뮬 경과시간 — GUI 는 rendering_dt(4 물리 서브스텝), headless 는
+# physics_dt. 실제 값과 어긋나면 슬립률·경과시간이 통째로 틀리므로 검증한다
+dt = STEP_DT
+_rdt = world.get_rendering_dt()
+if not HEADLESS and abs(_rdt - STEP_DT) > 1e-9:
+    print(f"[경고] rendering_dt {_rdt:.5f} ≠ 가정 {STEP_DT:.5f} — 보정")
+    dt = _rdt
 
 print("\n" + "=" * 78)
 print("yongbin 실설계 주행 검증 (v3 §13 스윙암 예압 9N)")
@@ -599,8 +729,11 @@ print(f"암 조인트 한계 {ARM_LIMIT_LO:+.1f}~{ARM_LIMIT_HI:+.1f}° "
       f"{CONTACT_JOINT_DEG:+.2f}°")
 print(f"휠 목표 {WHEEL_TARGET_DEG_S:.0f} deg/s (= 50 mm/s), 최대토크 "
       f"{WHEEL_MAX_TORQUE*1000:.1f} mN·m")
+print(f"중앙 관절: 스프링 {CENTER_STIFF*180/np.pi:.3f} N·m/rad, 댐퍼 "
+      f"{CENTER_DAMP*180/np.pi:.3f} N·m·s/rad, 시작 x {START_X*1000:.0f}mm")
 if WATER:
-    print(f"물: 입자 {len(_wpos):,}개, 유속 {FLOW_V} m/s(-X, 재순환), "
+    print(f"물: 입자 {len(_wpos):,}개, 유속 {abs(FLOW_V)} m/s "
+          f"({'경로 접선 상류→하류' if ELBOW else '-X'}, 재순환), "
           f"마찰 {FRICTION[0]}/{FRICTION[1]} (만관), GPU dynamics ON")
 
 if not HEADLESS:
@@ -625,11 +758,19 @@ _wheel_prims = [SingleRigidPrim(prim_path=f"{ROBOT}/wheel_{t}", name=f"w_{t}")
 
 
 def wheel_center_r_mm():
-    """휠 중심의 월드 반경(mm). 에지 접촉 시 39.43 — 이보다 작으면 미접촉."""
+    """휠 중심의 관 중심선까지 거리(mm). 에지 접촉 시 39.43 — 작으면 미접촉.
+
+    엘보 코스는 중심선이 굽으므로 축 반경(√(y²+z²))이 아니라 경로 중심선까지의
+    거리로 잰다 (직관 구간에서는 둘이 같다)."""
     out = []
     for w in _wheel_prims:
         p = w.get_world_pose()[0]
-        out.append(np.sqrt(float(p[1]) ** 2 + float(p[2]) ** 2) * 1000)
+        x, y, z = float(p[0]), float(p[1]), float(p[2])
+        if ELBOW:
+            d, _, _ = path_dist_tangent(np.array([x]), np.array([y]))
+            out.append(float(np.hypot(d[0], z)) * 1000)
+        else:
+            out.append(np.sqrt(y * y + z * z) * 1000)
     return np.array(out)
 
 
@@ -638,15 +779,14 @@ def wheel_center_r_mm():
 x_pre_settle = float(body.get_world_pose()[0][0])
 settle_spin = 0.0
 for _s in range(SETTLE_STEPS):
-    # 재순환은 흐름 모드 전용 — 엘보(고인 물)는 이탈 판정(r² 축 기준)이
-    # 출구 직관 구간을 오판해 물을 통째로 되돌려 버린다
+    # 유동 갱신 + 이탈 입자 재투입 (엘보는 경로 접선 유동장도 여기서 만든다)
     if WATER and FLOW_V != 0 and _s % RECYCLE_EVERY == 0:
         recycle_particles()
     sim_step(render=not HEADLESS)
     if WATER:
         _v = art.get_joint_velocities()
         settle_spin += (sum(float(_v[k]) for k in wheel_idx)
-                        / len(wheel_idx) * world.get_physics_dt())
+                        / len(wheel_idx) * dt)
 a0 = arm_deg()
 p0 = body.get_world_pose()[0]
 wr0 = wheel_center_r_mm()
@@ -673,11 +813,18 @@ if not WATER:
 
 # ── 주행 ──
 x0 = x_pre_settle if WATER else float(body.get_world_pose()[0][0])
+# 엘보 코스는 곡선거리 기준 (x 변위는 굽고 나면 멎는다)
+s0 = path_s(x0, 0.0) if ELBOW else 0.0
 spin = settle_spin if WATER else 0.0
 wheel_spin = np.zeros(len(wheel_idx))    # 휠별 구간 누적(rad) — 슬립 분리용
 print(f"\n{'스텝':>6} {'주행':>9} {'이론':>9} {'슬립률':>7} {'높이':>8} "
       f"암범위(°)  휠별 평균 rad/s")
-max_bend = 0.0                           # 곡관 통과 중 관절 최대 굽힘(°)
+max_bend = 0.0                           # 관절 |요| 최대(°) — 구간 무관
+# 구간별 요 이력: (코스 곡선거리 mm, 요°). 14차: |요| 최대만 보면 직진 크랩과
+# 곡관 굽힘이 섞여 "곡관에서 26° 꺾였다"고 오독한다 — 실제로는 곡관 안에서
+# 가장 곧았다. 굽힘은 **구간별 각도와 변화량**으로 봐야 한다
+yaw_trace = []
+S_ARC = (600.0, 757.1)                   # 곡관(원호) 구간의 코스 곡선거리 mm
 elbow_done = False
 for step in range(1, DRIVE_STEPS + 1):
     if WATER and FLOW_V != 0 and step % RECYCLE_EVERY == 0:
@@ -688,56 +835,122 @@ for step in range(1, DRIVE_STEPS + 1):
     wheel_spin += wv_now * dt
     spin += wv_now.mean() * dt
     p = body.get_world_pose()[0]
-    if step % 48 == 0:
+    if step % BEND_EVERY == 0:
         yaw_now = np.degrees(float(art.get_joint_positions()[center_idx]))
         max_bend = max(max_bend, abs(yaw_now))
+        if ELBOW:
+            # (코스 위치, 요, 바퀴가 말하는 누적거리) — 구간별 슬립 산출용.
+            # 오도메트리가 주 측위 수단이라 "어느 구간에서 몇 mm 틀리는가"가
+            # 전체 평균 슬립보다 훨씬 중요한 값이다
+            yaw_trace.append((path_s(float(p[0]), float(p[1])) * 1000, yaw_now,
+                              -WHEEL_R * spin * 1000))
     if ELBOW:
-        if float(p[1]) > 0.55:
+        if float(p[1]) > STOP_Y_ELBOW:
             elbow_done = True
-            print(f"→ 전체 코스 주파: 직관 550mm + 엘보 90° + 출구 직관 "
-                  f"450mm (스텝 {step}, {step * dt:.1f} s)")
+            print(f"→ 전체 코스 주파: 직관 + 엘보 90° + 출구 직관 "
+                  f"(스텝 {step}, {step * dt:.1f} s)")
             break
     elif float(p[0]) > (STOP_X_WATER if WATER else 0.24):
         print(f"→ 배관 끝 근접 — 정지 (스텝 {step})")
         break
     if step % REPORT_EVERY == 0:
-        travel = (float(p[0]) - x0) * 1000
-        ideal = -WHEEL_R * spin * 1000     # 휠 +X 전진 = 음의 회전
+        travel = ((path_s(float(p[0]), float(p[1])) - s0) * 1000 if ELBOW
+                  else (float(p[0]) - x0) * 1000)
+        ideal = -WHEEL_R * spin * 1000     # 휠 전진 = 음의 회전
         slip = travel / ideal if abs(ideal) > 1e-6 else 0.0
         ar = arm_deg()
         wavg = wheel_spin / (REPORT_EVERY * dt)
         wheel_spin[:] = 0.0
         wv = " ".join(f"{w:+5.2f}" for w in wavg)
         jp = art.get_joint_positions()
-        pos_txt = (f"xy {float(p[0])*1000:>4.0f},{float(p[1])*1000:>4.0f}mm"
-                   if ELBOW else f"{travel:>7.1f}mm {ideal:>7.1f}mm "
-                                 f"{slip:>7.3f}")
+        pos_txt = (f"s{travel:>6.0f}mm xy{float(p[0])*1000:>4.0f},"
+                   f"{float(p[1])*1000:>4.0f} 슬립{slip:>6.3f}" if ELBOW
+                   else f"{travel:>7.1f}mm {ideal:>7.1f}mm {slip:>7.3f}")
+        flow_txt = f" 유속 {_flow_speed_now*1000:+4.0f}mm/s" if (WATER and ELBOW) else ""
         print(f"{step:>6} {pos_txt} "
               f"{float(p[2])*1000:>+6.1f}mm  {ar.min():+.1f}~{ar.max():+.1f}  "
               f"{wv}  롤 {body_roll_deg():+6.1f}° "
-              f"요 {np.degrees(float(jp[center_idx])):+5.1f}°")
+              f"요 {np.degrees(float(jp[center_idx])):+5.1f}°{flow_txt}")
 
 p_end = body.get_world_pose()[0]
-travel = (float(p_end[0]) - x0) * 1000
+travel = ((path_s(float(p_end[0]), float(p_end[1])) - s0) * 1000 if ELBOW
+          else (float(p_end[0]) - x0) * 1000)
 ideal = -WHEEL_R * spin * 1000
 slip = travel / ideal if abs(ideal) > 1e-6 else 0.0
 a1 = arm_deg()
 wr1 = wheel_center_r_mm()
 print("=" * 78)
-print(f"결과: 주행 {travel:.1f} mm / 이론 {ideal:.1f} mm → 슬립률 {slip:.3f}")
+print(f"결과: 주행 {travel:.1f} mm{' (코스 곡선거리)' if ELBOW else ''} / "
+      f"이론 {ideal:.1f} mm → 슬립률 {slip:.3f}")
 print(f"주행 후 암 조인트(°): {np.array2string(a1, precision=2)}")
 print(f"주행 후 휠 반경(mm): {np.array2string(wr1, precision=2)}")
-if ELBOW:
-    print(f"관절 최대 굽힘 {max_bend:.1f}° (v3 SR 기하 예측 36.1°, 한계 55°)")
-    print(f"최종 위치 x {float(p_end[0])*1000:.0f}, y {float(p_end[1])*1000:.0f} mm")
-    print(f"[{'OK' if elbow_done else 'FAIL'}] "
-          f"{'직관+SR엘보+출구직관 전체 코스 주파' if elbow_done else '코스 미완주 — 위 위치에서 정체'}")
-elif WATER:
+
+
+def water_stats():
+    """물 상태 요약 — 재순환 0 이면 GPU 위치 쓰기가 안 먹은 것."""
     wpts = np.array(water_instancer.GetPositionsAttr().Get())
-    wr_all = np.sqrt(wpts[:, 1] ** 2 + wpts[:, 2] ** 2)
-    leaked = int(np.sum(wr_all > 0.055))
+    if ELBOW:
+        d, _, _ = path_dist_tangent(wpts[:, 0], wpts[:, 1])
+        off = np.hypot(d, wpts[:, 2])
+    else:
+        off = np.sqrt(wpts[:, 1] ** 2 + wpts[:, 2] ** 2)
     print(f"물: 입자 {len(wpts):,}개, 재순환 누적 {_recycled:,}개 "
-          f"(0이면 GPU 위치 쓰기 미반영), 관벽 관통 {leaked}개")
+          f"(0이면 GPU 위치 쓰기 미반영), 관벽 관통 {int(np.sum(off > 0.055))}개"
+          + (f", 최종 유동 {_flow_speed_now*1000:+.0f}mm/s "
+             f"(목표 {abs(FLOW_V)*1000:.0f})" if ELBOW else ""))
+
+
+if ELBOW:
+    print(f"관절 |요| 최대 {max_bend:.1f}° (한계 55°) — 구간 무관 최대값")
+    if yaw_trace:
+        tr_s = np.array([t[0] for t in yaw_trace])
+        tr_y = np.array([t[1] for t in yaw_trace])
+        tr_i = np.array([t[2] for t in yaw_trace])
+        print("구간별 요(°) / 슬립 — 오도메트리가 주 측위 수단이라 구간별이 핵심:")
+        print(f"  {'구간':<16}{'요 평균':>8}{'요 범위':>16}{'실제':>8}{'바퀴':>8}{'슬립':>8}")
+        for tag, m in (("직관 (s<600)", tr_s < S_ARC[0]),
+                       ("곡관 (600~757)", (tr_s >= S_ARC[0]) & (tr_s <= S_ARC[1])),
+                       ("출구직관 (s>757)", tr_s > S_ARC[1])):
+            if m.sum() < 2:
+                continue
+            ds = tr_s[m][-1] - tr_s[m][0]
+            di = tr_i[m][-1] - tr_i[m][0]
+            sl = ds / di if abs(di) > 1e-6 else 0.0
+            print(f"  {tag:<16}{tr_y[m].mean():>+8.1f}"
+                  f"{f'{tr_y[m].min():+.1f}~{tr_y[m].max():+.1f}':>16}"
+                  f"{ds:>7.0f}mm{di:>7.0f}mm{sl:>8.3f}")
+        # ── 오도메트리 위치 오차 ──
+        # 슬립률 자체는 오차가 아니다. 어디서나 일정하면 보정계수 하나로 지워지고,
+        # 결함 위치 기록에 아무 문제가 없다. 실제 오차는 "보정 후에도 남는 편차"
+        # — 구간마다 슬립이 다른 정도다. 결함 병합 규칙이 거리 50mm 기준이므로
+        # 잔차가 그 절반(25mm)을 넘으면 같은 결함을 다른 결함으로 세기 시작한다
+        k = ((tr_s[-1] - tr_s[0]) / (tr_i[-1] - tr_i[0])
+             if abs(tr_i[-1] - tr_i[0]) > 1e-6 else 1.0)
+        res_raw = tr_s - (tr_s[0] + (tr_i - tr_i[0]))        # 보정 없음
+        res_cal = tr_s - (tr_s[0] + k * (tr_i - tr_i[0]))    # 단일 계수 보정
+        print(f"  오도메트리 위치 오차 — 무보정 최대 "
+              f"{np.abs(res_raw).max():.0f}mm / 보정계수 k={k:.3f} 적용 시 최대 "
+              f"{np.abs(res_cal).max():.0f}mm, RMS {np.sqrt((res_cal**2).mean()):.0f}mm")
+        print(f"     (결함 병합 규칙 50mm 기준 → 잔차 25mm 이하가 목표)")
+        pre = tr_y[tr_s < S_ARC[0]]
+        arc = tr_y[(tr_s >= S_ARC[0]) & (tr_s <= S_ARC[1])]
+        if pre.size and arc.size:
+            # 곡관이 실제로 요구한 굽힘 = 직진 크랩 기준선 대비 변화량
+            base = float(np.median(pre[-10:] if pre.size >= 10 else pre))
+            d = float(arc[np.argmax(np.abs(arc - base))] - base)
+            print(f"  → 직진 크랩 기준선 {base:+.1f}° 대비 곡관 최대 변화 "
+                  f"{d:+.1f}° (v3 SR 기하 요구 +36.1°, 달성률 {abs(d)/36.1*100:.0f}%)")
+            print("     달성률이 낮으면 관절이 안 꺾이고 휠 스크럽으로 통과한 것 "
+                  "— 곡관 구간 슬립률 하락과 같이 볼 것")
+    print(f"최종 위치 x {float(p_end[0])*1000:.0f}, y {float(p_end[1])*1000:.0f} mm")
+    if WATER:
+        water_stats()
+    print(f"[{'OK' if elbow_done else 'FAIL'}] "
+          + ("직관+SR엘보+출구직관 전체 코스 주파"
+             + (" (흐르는 물 거슬러)" if WATER else "")
+             if elbow_done else "코스 미완주 — 위 위치에서 정체"))
+elif WATER:
+    water_stats()
     ok = travel > 100.0
     print(f"[{'OK' if ok else 'FAIL'}] 흐르는 물 거슬러 {travel:.0f}mm 전진, "
           f"슬립률 {slip:.3f} (합격: 100mm+)")
