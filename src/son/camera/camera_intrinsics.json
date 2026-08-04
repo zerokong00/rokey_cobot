@@ -1,0 +1,14 @@
+{
+  "width": 1280,
+  "height": 720,
+  "f_px": 523.8471269767526,
+  "ppx": 640.0,
+  "ppy": 360.0,
+  "hfov_deg": 140.0,
+  "model": "equidistant_fisheye",
+  "clipping": [
+    0.005,
+    5.0
+  ],
+  "hz": 10.0
+}

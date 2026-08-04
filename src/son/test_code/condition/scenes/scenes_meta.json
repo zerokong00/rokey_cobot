@@ -1,0 +1,71 @@
+{
+  "width": 1280,
+  "height": 720,
+  "fx": 523.8471269767526,
+  "fy": 523.8471269767526,
+  "ppx": 640.0,
+  "ppy": 360.0,
+  "projection": "fisheye_equidistant",
+  "f_fish": 523.8471269767526,
+  "hfov_deg": 140.0,
+  "bore_m": 0.05,
+  "joint_m": 0.22,
+  "max_range_m": 1.5,
+  "scenes": {
+    "normal": {
+      "truth": "NORMAL",
+      "offset_mm": 0.0,
+      "invalid_ratio": 0.0
+    },
+    "normal_noisy": {
+      "truth": "NORMAL",
+      "offset_mm": 0.0,
+      "invalid_ratio": 0.0
+    },
+    "misalign_2mm": {
+      "truth": "MISALIGNMENT",
+      "offset_mm": 2.0,
+      "invalid_ratio": 0.0
+    },
+    "misalign_5mm": {
+      "truth": "MISALIGNMENT",
+      "offset_mm": 5.0,
+      "invalid_ratio": 0.0
+    },
+    "misalign_12mm": {
+      "truth": "MISALIGNMENT",
+      "offset_mm": 12.0,
+      "invalid_ratio": 0.0
+    },
+    "misalign_5mm_noisy": {
+      "truth": "MISALIGNMENT",
+      "offset_mm": 5.0,
+      "invalid_ratio": 0.0
+    },
+    "disconnected": {
+      "truth": "DISCONNECTED",
+      "offset_mm": 0.0,
+      "invalid_ratio": 0.046715494791666666
+    },
+    "disconnected_off": {
+      "truth": "DISCONNECTED",
+      "offset_mm": 4.0,
+      "invalid_ratio": 0.046715494791666666
+    },
+    "undetermined": {
+      "truth": "UNDETERMINED",
+      "offset_mm": 3.0,
+      "invalid_ratio": 0.0
+    },
+    "undetermined_mild": {
+      "truth": "UNDETERMINED",
+      "offset_mm": 2.0,
+      "invalid_ratio": 0.0
+    },
+    "undetermined_heavy": {
+      "truth": "UNDETERMINED",
+      "offset_mm": 1.0,
+      "invalid_ratio": 0.0
+    }
+  }
+}
