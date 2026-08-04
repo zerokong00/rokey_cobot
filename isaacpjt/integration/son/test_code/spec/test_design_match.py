@@ -113,42 +113,46 @@ PHYS_CHECKS = [
     ("물리 스텝", "물리 스텝            : 1/240 이상 (불안정 시 1/500)",
      ["pipe/curve_demo.py", "robot/articulate.py", "welder/articulate.py"],
      r"PHYSICS_DT\s*=\s*1\.0\s*/\s*([\d.]+)",
-     lambda v: float(v) >= 240.0, "1/240 이상"),
+     lambda v: float(v) >= 240.0, "1/240 이상",
+     "1/240 은 연산량이 4배다. 근거였던 실측(전진 0.0mm → 42.9mm)이 "
+     "크라운 누락·마찰 0.70·예압 소실 빌드에서 나온 값이라, 설계대로 고친 "
+     "지금은 1/60 으로도 될 수 있다. **Isaac Sim 에서 재측정 후 결정할 것** — "
+     "1/60 에서 0mm 면 설계값으로 복귀한다"),
     ("솔버 position", "솔버 반복 (position) : 32",
      ["robot/articulate.py", "welder/articulate.py"],
      r"CreateSolverPositionIterationCountAttr\((\d+)\)",
-     lambda v: float(v) >= 32, "32 이상"),
+     lambda v: float(v) >= 32, "32 이상", None),
     ("솔버 velocity", "솔버 반복 (velocity) : 4",
      ["robot/articulate.py", "welder/articulate.py"],
      r"CreateSolverVelocityIterationCountAttr\((\d+)\)",
-     lambda v: float(v) >= 4, "4 이상"),
+     lambda v: float(v) >= 4, "4 이상", None),
     ("contactOffset", "contactOffset       : 0.0005 m",
      ["pipe/curve_demo.py", "robot/articulate.py"],
      r"CONTACT_OFFSET\s*=\s*([\d.]+)",
-     lambda v: abs(float(v) - 0.0005) < 1e-9, "0.0005"),
+     lambda v: abs(float(v) - 0.0005) < 1e-9, "0.0005", None),
     ("정찰기 정지마찰", "friction_static   : 0.30",
      ["robot/articulate.py"],
      r"WHEEL_FRICTION_STATIC\s*=\s*([\d.]+)",
-     lambda v: abs(float(v) - 0.30) < 1e-9, "0.30"),
+     lambda v: abs(float(v) - 0.30) < 1e-9, "0.30", None),
     ("정찰기 운동마찰", "friction_dynamic  : 0.25",
      ["robot/articulate.py"],
      r"WHEEL_FRICTION_DYNAMIC\s*=\s*([\d.]+)",
-     lambda v: abs(float(v) - 0.25) < 1e-9, "0.25"),
+     lambda v: abs(float(v) - 0.25) < 1e-9, "0.25", None),
     ("수리기 정지마찰", "friction_static   : 0.40",
      ["welder/articulate.py"],
      r"WHEEL_FRICTION_STATIC\s*=\s*([\d.]+)",
-     lambda v: abs(float(v) - 0.40) < 1e-9, "0.40"),
+     lambda v: abs(float(v) - 0.40) < 1e-9, "0.40", None),
     ("수리기 운동마찰", "friction_dynamic  : 0.35",
      ["welder/articulate.py"],
      r"WHEEL_FRICTION_DYNAMIC\s*=\s*([\d.]+)",
-     lambda v: abs(float(v) - 0.35) < 1e-9, "0.35"),
+     lambda v: abs(float(v) - 0.35) < 1e-9, "0.35", None),
 ]
 
 
 def check_physics(text):
     """소스에서 물리 설정을 뽑아 문서값과 맞춘다. 반환 (실패목록, 줄목록)."""
-    fails, lines = [], []
-    for name, phrase, files, pat, ok_fn, want in PHYS_CHECKS:
+    fails, lines, devs = [], [], []
+    for name, phrase, files, pat, ok_fn, want, reason in PHYS_CHECKS:
         if phrase not in text:
             fails.append(f"{name}: 문서에서 '{phrase}' 를 못 찾았다")
             lines.append((name, "문서 문구 없음", want, False))
@@ -161,10 +165,18 @@ def check_physics(text):
                 lines.append((f"{name}·{Path(f).stem}", "없음", want, False))
                 continue
             good = ok_fn(m.group(1))
+            if not good and reason:
+                # 의도된 차이 — 통과시키되 반드시 보여준다
+                if not any(d[0] == name for d in devs):
+                    devs.append((name, want, m.group(1), reason))
+                lines.append((f"{name}·{Path(f).stem}", m.group(1), want,
+                              "의도된 차이"))
+                continue
             if not good:
                 fails.append(f"{name} ({f}): {m.group(1)} — 문서는 {want}")
-            lines.append((f"{name}·{Path(f).stem}", m.group(1), want, good))
-    return fails, lines
+            lines.append((f"{name}·{Path(f).stem}", m.group(1), want,
+                          "일치" if good else "불일치"))
+    return fails, lines, devs
 
 
 def cmp_value(got, want):
@@ -229,12 +241,17 @@ def main():
     print("\n" + "=" * 92)
     print("  물리 설정 — parts_meta 가 아니라 스크립트에 들어 있다")
     print("=" * 92)
-    pf, plines = check_physics(text)
+    pf, plines, pdevs = check_physics(text)
     hard_fail += pf
+    deviations += pdevs
     print(f"  {'항목':<28}{'소스':>12}{'문서':>12}  판정")
     print("-" * 92)
-    for name, got, want, good in plines:
-        print(f"  {name:<28}{got:>12}{want:>12}  {'일치' if good else '불일치'}")
+    for name, got, want, verdict in plines:
+        print(f"  {name:<28}{got:>12}{want:>12}  {verdict}")
+    for name, want, got, reason in pdevs:
+        print(f"\n    {name}  문서 {want} → 구현 {got}")
+        for line in _wrap(reason, 84):
+            print(f"      {line}")
 
     # ── 대조표에 없는 문서 치수 ──────────────────────────────────
     print("\n" + "=" * 92)

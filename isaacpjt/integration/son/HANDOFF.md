@@ -68,6 +68,26 @@ rclpy 를 쓴다. 카메라 없이 주행 시험만 하려면 ROS 빌드가 필�
 
 ---
 
+## ⚠ pull 받을 때마다 ②③을 다시 돌릴 것
+
+`.usd` 는 레포에 없다(`.gitignore`). **스크립트가 실행 중에 만드는 산출물**이라
+그게 맞다 — 미리 구워 배포하면 코드를 고쳐도 그 파일은 안 바뀌어 옛 값으로
+돌아간다(실제로 그 사고가 났다).
+
+그래서 **pull 로 형상이나 상수가 바뀌면 USD 를 다시 만들어야 한다.**
+
+```bash
+git pull
+PYTHONUNBUFFERED=1 isaac_python robot/articulate.py --headless    # ②
+PYTHONUNBUFFERED=1 isaac_python welder/articulate.py --headless   # ③
+PYTHONUNBUFFERED=1 isaac_python camera/rig.py --save               # ④ GUI
+```
+
+예를 들어 2026-08-04 갱신에서 **휠에 크라운(R50)이 들어가 `wheel.stl` 이
+바뀌었다.** 옛 USD 를 그대로 쓰면 크라운 없는 바퀴로 돈다.
+
+---
+
 ## 실행 순서
 
 ```bash

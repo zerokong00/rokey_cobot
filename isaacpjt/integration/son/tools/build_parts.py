@@ -194,7 +194,9 @@ def wheel_mesh(p):
     """
     hw = p['wheel_width'] / 2.0
     cr = p.get('wheel_crown_r')
-    ys = np.linspace(-hw, hw, p.get('crown_sections', 17))
+    # 단면 수. 9개면 이웃 단면 사이 형상 오차가 9µm 로, 접촉 감지폭
+    # contactOffset 500µm 의 1/55 다. 17 개는 삼각형만 2배 늘 뿐 의미가 없다.
+    ys = np.linspace(-hw, hw, p.get('crown_sections', 9))
     if cr:
         drop = cr - np.sqrt(np.maximum(cr ** 2 - ys ** 2, 0.0))
     else:
