@@ -56,7 +56,9 @@ from omni.physx.scripts import particleUtils
 from pxr import Gf, Sdf, UsdGeom, UsdLux, UsdPhysics, UsdShade, Vt
 
 HERE = Path(__file__).resolve().parent
-PIPE_USD = str(HERE.parent / "pipe" / "pipe_inner_crack2.usd")
+# 2026-08-04 폴더 정리: scripts/ 와 assets/ 분리 — 에셋은 여기 기준
+ASSETS = HERE.parent / "assets"
+PIPE_USD = str(ASSETS / "pipe" / "pipe_inner_crack2.usd")
 
 # 크랙 배관 실측 (실물 스케일 mm → m 변환만)
 PIPE_SCALE = 0.001

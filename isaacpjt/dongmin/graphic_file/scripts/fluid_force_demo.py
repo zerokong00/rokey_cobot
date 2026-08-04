@@ -52,8 +52,10 @@ from pxr import Gf, Sdf, UsdGeom, UsdLux, UsdPhysics, UsdShade
 # 설정 블록 — 새 로봇/파이프 도착 시 여기만 교체
 # ══════════════════════════════════════════════════════════════════
 HERE = Path(__file__).resolve().parent
-ROBOT_USD = str(HERE / "robot_assembled.usd")
-PIPE_USD = str(HERE.parent / "pipe" / "pipe.usd")
+# 2026-08-04 폴더 정리: scripts/ 와 assets/ 분리 — 에셋은 여기 기준
+ASSETS = HERE.parent / "assets"
+ROBOT_USD = str(ASSETS / "robot" / "robot_assembled.usd")
+PIPE_USD = str(ASSETS / "pipe" / "pipe.usd")
 
 # 배관 (pipe_drive_demo.py 와 동일)
 PIPE_CAD_BORE_MM = 45.0

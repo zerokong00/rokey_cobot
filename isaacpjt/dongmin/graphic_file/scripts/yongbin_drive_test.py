@@ -185,8 +185,15 @@ if WATER:
     # 그 관통 해소 임펄스로 로봇이 -X 로 1.66 m/s 사출 → 이후 자유낙하
     # (본체 -178m). 후방 휠 뒷면이 관 안에 들어오는 -0.20 으로 당긴다
     START_X = max(START_X, -0.20)
+    # 유속. 기본 0.10 은 데모용 값이고 v3 설계값은 0.86 m/s(매닝, S=1/100)로
+    # 8.6배다 — 항력은 v² 이라 데모 조건에는 설계 항력 2.3N 이 사실상 안 들어간다.
+    # 임무 조건 검증은 --flow 0.86 으로 할 것
     FLOW_V = -0.10                    # 경로 접선 기준 유속(상류 방향, 로봇 진행 반대)
     FLOW_BLEND = 0.20                 # 입자 속도를 유동 목표로 끌어당기는 계수
+    if "--flow" in sys.argv:
+        FLOW_V = -abs(float(sys.argv[sys.argv.index("--flow") + 1]))
+    if "--blend" in sys.argv:
+        FLOW_BLEND = float(sys.argv[sys.argv.index("--blend") + 1])
     W_SPACING = 0.009
     W_PCO = 0.008
     W_FLUID_REST = 0.0048
@@ -867,6 +874,11 @@ for step in range(1, DRIVE_STEPS + 1):
                    f"{float(p[1])*1000:>4.0f} 슬립{slip:>6.3f}" if ELBOW
                    else f"{travel:>7.1f}mm {ideal:>7.1f}mm {slip:>7.3f}")
         flow_txt = f" 유속 {_flow_speed_now*1000:+4.0f}mm/s" if (WATER and ELBOW) else ""
+        if ELBOW:
+            # 곡관에서 바퀴가 벽에서 떨어지는지 — 암 각이 신장 한계에 붙어도
+            # 그것만으로는 미접촉을 단정 못 한다. 중심선까지 거리로 직접 판정
+            wr = wheel_center_r_mm()
+            flow_txt += f" 접촉 {int((np.abs(wr - 39.43) < 0.5).sum())}/6"
         print(f"{step:>6} {pos_txt} "
               f"{float(p[2])*1000:>+6.1f}mm  {ar.min():+.1f}~{ar.max():+.1f}  "
               f"{wv}  롤 {body_roll_deg():+6.1f}° "

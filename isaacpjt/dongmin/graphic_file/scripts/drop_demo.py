@@ -31,8 +31,10 @@ from isaacsim.core.utils.viewports import set_camera_view
 from pxr import Gf, Sdf, UsdGeom, UsdLux, UsdPhysics, UsdShade
 
 HERE = Path(__file__).resolve().parent
-ROBOT_USD = str(HERE / "robot_assembled.usd")
-PIPE_USD = str(HERE.parent / "pipe" / "pipe.usd")
+# 2026-08-04 폴더 정리: scripts/ 와 assets/ 분리 — 에셋은 여기 기준
+ASSETS = HERE.parent / "assets"
+ROBOT_USD = str(ASSETS / "robot" / "robot_assembled.usd")
+PIPE_USD = str(ASSETS / "pipe" / "pipe.usd")
 
 # 배관 (pipe_drive_demo.py 와 같은 값). 바닥 위에 눕혀 둔다 — 로봇은 그 옆에 떨어진다.
 PIPE_CAD_BORE_MM = 45.0

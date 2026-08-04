@@ -8,5 +8,5 @@ __pycache__/
 *.onnx
 *.pt
 *.pth
-isaacpjt/dongmin/graphic_file/robot/inspect_out/
+isaacpjt/dongmin/graphic_file/out/
 CLAUDE.md

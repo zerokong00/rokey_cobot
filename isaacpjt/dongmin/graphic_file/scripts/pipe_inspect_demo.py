@@ -39,10 +39,12 @@ from isaacsim.sensors.camera import Camera
 from pxr import Gf, Sdf, UsdGeom, UsdLux, UsdPhysics, UsdShade
 
 HERE = Path(__file__).resolve().parent
-ROBOT_USD = str(HERE / "robot_assembled.usd")
-PIPE_USD = str(HERE.parent / "pipe" / "pipe.usd")
-OUT_DIR = HERE / "inspect_out"
-OUT_DIR.mkdir(exist_ok=True)
+# 2026-08-04 폴더 정리: scripts/ 와 assets/ 분리 — 에셋은 여기 기준
+ASSETS = HERE.parent / "assets"
+ROBOT_USD = str(ASSETS / "robot" / "robot_assembled.usd")
+PIPE_USD = str(ASSETS / "pipe" / "pipe.usd")
+OUT_DIR = HERE.parent / "out" / "inspect"
+OUT_DIR.mkdir(parents=True, exist_ok=True)
 for _old in OUT_DIR.glob("*.png"):
     _old.unlink()                      # 이전 실행 프레임이 섞이면 결과 해석을 오염시킨다
 for _old in OUT_DIR.glob("*.csv"):

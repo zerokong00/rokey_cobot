@@ -31,7 +31,9 @@ from omni.physx.scripts import particleUtils
 from pxr import Gf, Sdf, UsdGeom, UsdLux, UsdPhysics, UsdShade, Vt
 
 HERE = Path(__file__).resolve().parent
-PIPE_USD = str(HERE.parent / "pipe" / "inner_pipe_crack1.usd")
+# 2026-08-04 폴더 정리: scripts/ 와 assets/ 분리 — 에셋은 여기 기준
+ASSETS = HERE.parent / "assets"
+PIPE_USD = str(ASSETS / "pipe" / "inner_pipe_crack1.usd")
 
 # ── STL 실측값 (mm) — 사전 파싱으로 확인, 추측 아님 ──
 PIPE_LEN_MM = 500.0

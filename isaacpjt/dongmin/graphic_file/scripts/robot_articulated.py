@@ -35,13 +35,15 @@ from isaacsim.core.prims import SingleArticulation
 from pxr import Gf, PhysxSchema, Usd, UsdGeom, UsdPhysics, UsdShade
 
 HERE = Path(__file__).resolve().parent
-BODY_USD = str(HERE / "body.usd")
-LEG_USD = str(HERE / "leg.usd")
-WHEEL_USD = str(HERE / "wheel.usd")
+# 2026-08-04 폴더 정리: scripts/ 와 assets/ 분리 — 에셋은 여기 기준
+ASSETS = HERE.parent / "assets"
+BODY_USD = str(ASSETS / "robot" / "body.usd")
+LEG_USD = str(ASSETS / "robot" / "leg.usd")
+WHEEL_USD = str(ASSETS / "robot" / "wheel.usd")
 # 환경변수로 변형 빌드 가능 (기본값 = 기존과 동일):
 #   LEG_PRELOAD_N=9 ROBOT_OUT_USD=robot_assembled_p9.usd isaac_python robot_articulated.py --headless
 # 물속 테스트용 고예압 변형(실물 설계 9N 상당)을 원본 USD 를 건드리지 않고 만들기 위함
-OUT_USD = str(HERE / os.environ.get("ROBOT_OUT_USD", "robot_assembled.usd"))
+OUT_USD = str(ASSETS / "robot" / os.environ.get("ROBOT_OUT_USD", "robot_assembled.usd"))
 
 # ══ STL 실측값 (mm) — 추측 아님, 정점 파싱으로 확인 ═══════════════
 LEG_ANGLES = [0.0, 120.0, 240.0]   # body 보스 3개 실측 각도

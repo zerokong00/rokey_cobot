@@ -28,9 +28,11 @@ import omni.usd
 from pxr import Usd, UsdGeom, Gf
 
 HERE = Path(__file__).resolve().parent
-BODY_USD = str(HERE / "body.usd")
-LEG_USD = str(HERE / "leg.usd")
-WHEEL_USD = str(HERE / "wheel.usd")
+# 2026-08-04 폴더 정리: scripts/ 와 assets/ 분리 — 에셋은 여기 기준
+ASSETS = HERE.parent / "assets"
+BODY_USD = str(ASSETS / "robot" / "body.usd")
+LEG_USD = str(ASSETS / "robot" / "leg.usd")
+WHEEL_USD = str(ASSETS / "robot" / "wheel.usd")
 
 # ── STL 실측값 (mm) ──────────────────────────────────────────────
 MM = 0.001                          # mm -> m
