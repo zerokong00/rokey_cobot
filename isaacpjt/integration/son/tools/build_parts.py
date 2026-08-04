@@ -35,6 +35,10 @@ P = dict(
     arm_width=10.0,
     wheel_dia=20.0,
     wheel_width=15.0,
+    # 설계확정본 "휠 Ø20 x 폭 15mm, **크라운 반경 50mm**". 관 내반경과 같은
+    # 값이라 트레드가 관벽 곡률에 그대로 맞물린다. 이 값을 빠뜨려 2026-08-04
+    # 까지 휠이 원통으로 만들어졌고, 트레드 양끝 2점으로만 닿았다.
+    wheel_crown_r=50.0,
     stagger=7.0,          # 10mm 였으나 링(x58)과 암 앞끝(피벗+3) 여유가 1mm 뿐이라 축소.
                           # 휠 접촉점 퍼짐도 줄어 곡관 필요 스트로크가 함께 감소한다
     torch_rot_r=9.0,
@@ -146,10 +150,57 @@ def arm_mesh(p):
     return m, dx, dr
 
 
+def revolve_profile(ys, radii, sections):
+    """(y, 반경) 프로파일을 Y 축 둘레로 돌려 회전체를 만든다.
+
+    trimesh.creation.cylinder 는 반경이 일정해야 해서 크라운을 못 만든다.
+    """
+    ang = np.linspace(0.0, 2.0 * np.pi, sections, endpoint=False)
+    c, sn = np.cos(ang), np.sin(ang)
+    rings = [np.stack([r * c, np.full(sections, y), r * sn], axis=-1)
+             for y, r in zip(ys, radii)]
+    verts = np.concatenate(rings, axis=0)
+    faces = []
+    for i in range(len(ys) - 1):
+        a, b = i * sections, (i + 1) * sections
+        for j in range(sections):
+            k = (j + 1) % sections
+            faces += [[a + j, b + j, a + k], [a + k, b + j, b + k]]
+    # 양 끝 뚜껑
+    lo = len(verts)
+    verts = np.vstack([verts, [[0.0, ys[0], 0.0], [0.0, ys[-1], 0.0]]])
+    top = (len(ys) - 1) * sections
+    for j in range(sections):
+        k = (j + 1) % sections
+        faces += [[lo, j, k], [lo + 1, top + k, top + j]]
+    return trimesh.Trimesh(vertices=verts, faces=np.array(faces),
+                           process=False)
+
+
 def wheel_mesh(p):
-    wh = cylinder(radius=p['wheel_dia'] / 2.0, height=p['wheel_width'],
-                  sections=p['sections'])
-    wh.apply_transform(R(90, X))
+    """크라운(볼록 배럴) 트레드를 가진 휠.
+
+    ⚠ **원통으로 만들면 안 된다.** 관 내벽은 원주 방향으로 휘어 있어서
+    평면 트레드는 양끝 모서리 2점으로만 닿는다. 접촉이 날카로운 에지에
+    몰리고 휠 중심이 설계보다 0.566mm 안쪽으로 밀린다.
+
+    크라운 반경을 관 내반경(50mm)과 같게 두면 트레드 전폭이 벽에 맞물린다.
+    폭 방향 위치 y 에서 휠 반경을 이렇게 깎는다.
+
+        r(y) = wheel_r - (crown_r - sqrt(crown_r^2 - y^2))
+
+    가장자리(y=±7.5)에서 0.566mm 얕아진다. 그래야 y=0 이 벽에 닿을 때
+    가장자리도 같이 닿는다.
+    """
+    hw = p['wheel_width'] / 2.0
+    cr = p.get('wheel_crown_r')
+    ys = np.linspace(-hw, hw, p.get('crown_sections', 17))
+    if cr:
+        drop = cr - np.sqrt(np.maximum(cr ** 2 - ys ** 2, 0.0))
+    else:
+        drop = np.zeros_like(ys)
+    radii = p['wheel_dia'] / 2.0 - drop
+    wh = revolve_profile(ys, radii, p['sections'])
     hub = cylinder(radius=p['wheel_dia'] / 2.0 - 3.0,
                    height=p['wheel_width'] + 1.2, sections=p['sections'])
     hub.apply_transform(R(90, X))
@@ -508,16 +559,30 @@ def arm_angle_for_contact(contact_r, p):
     return np.degrees(np.arcsin(np.clip(s, -1.0, 1.0)))
 
 
-def arm_angle_seated(bore_r, p):
-    """휠 림 모서리가 관벽에 닿는 암 각도.
+def wheel_seat_radius(bore_r, p, samples=201):
+    """휠이 관벽에 닿을 때 **휠 중심**이 관축에서 갖는 반경.
 
-    폭 15mm 평면 휠은 중심면이 아니라 양 모서리(y=±7.5)가 먼저 벽에 닿는다.
-    벽이 원주 방향으로 휘어 모서리 위치의 벽 반경이 bore_r 보다 작기 때문이다.
-    기존 44.4도는 나이프 에지 접촉을 가정한 값이라 모서리가 0.55mm 파고든다.
+    휠 축은 원주 방향이다. 트레드 폭 방향 위치 y, 그 자리의 휠 반경 r(y) 인
+    점은 관축에서 sqrt(y^2 + (R_c + r(y))^2) 떨어져 있다. 이 최댓값이 관 내반경
+    과 같아지는 R_c 를 찾는다.
+
+      크라운 없음  r(y)=10 고정 → 최댓값이 **가장자리**(y=±7.5)에서 나온다.
+                   R_c = sqrt(50^2 - 7.5^2) - 10 = 39.434mm — 0.566mm 밀린다.
+      크라운 R50   폭 전체에서 정확히 50.0 이 된다(크라운 반경 = 관 내반경).
+                   R_c = 50 - 10 = 40.0mm — 설계값 그대로.
     """
-    half_w = p['wheel_width'] / 2.0
-    wall_at_edge = np.sqrt(bore_r ** 2 - half_w ** 2)
-    r_wheel = wall_at_edge - p['wheel_dia'] / 2.0
+    hw = p['wheel_width'] / 2.0
+    cr = p.get('wheel_crown_r')
+    ys = np.linspace(-hw, hw, samples)
+    drop = (cr - np.sqrt(np.maximum(cr ** 2 - ys ** 2, 0.0))) if cr else 0.0
+    r = p['wheel_dia'] / 2.0 - drop
+    # max_y sqrt(y^2 + (R_c + r(y))^2) = bore_r  →  R_c = min_y (...)
+    return float(np.min(np.sqrt(np.maximum(bore_r ** 2 - ys ** 2, 0.0)) - r))
+
+
+def arm_angle_seated(bore_r, p):
+    """휠이 관벽에 착좌하는 암 각도."""
+    r_wheel = wheel_seat_radius(bore_r, p)
     return np.degrees(np.arcsin((r_wheel - p['pivot_r']) / p['arm_len']))
 
 
@@ -612,6 +677,7 @@ def main():
         arm_dr_nominal=dr,
         wheel_r=wheel_r,
         wheel_width=p['wheel_width'],
+        wheel_crown_r=p.get('wheel_crown_r'),
         stagger=p['stagger'],
         front_arms=p['front_arms'],
         rear_arms=p['rear_arms'],
@@ -643,11 +709,21 @@ def main():
     print(f'  암 피벗 반경            {p["pivot_r"]:.1f} mm')
     print(f'  암 기준 각도            {p["arm_angle"]:.2f}°  '
           f'(축방향 {dx:.2f} / 반경방향 {dr:.2f} mm)')
-    if abs(p['arm_angle'] - arm_angle_doc) > 1e-6:
-        rim = np.hypot(contact_r, p['wheel_width'] / 2.0)
-        print(f'    ※ 문서값 {arm_angle_doc:.2f}° 대신 림 접촉 조건으로 유도한 값. '
-              f'문서값이면 림이 {np.hypot(p["pivot_r"] + p["arm_len"] * np.sin(np.radians(arm_angle_doc)) + p["wheel_dia"] / 2.0, p["wheel_width"] / 2.0) - PIPE_ID / 2.0:.2f} mm 파고든다')
-        print(f'    림 모서리 반경          {rim:.2f} mm   (관벽 {PIPE_ID / 2.0:.1f} 이하여야 함)')
+    cr = p.get('wheel_crown_r')
+    print(f'  휠 크라운 반경          '
+          f'{f"{cr:.1f} mm (관 내반경 {PIPE_ID / 2.0:.1f} 과 일치 → 전폭 밀착)" if cr else "없음 — 원통 트레드, 에지 2점 접촉"}')
+    if abs(p['arm_angle'] - arm_angle_doc) > 0.05:
+        print(f'    ※ 문서값 {arm_angle_doc:.2f}° 와 {p["arm_angle"] - arm_angle_doc:+.2f}° 차이. '
+              f'크라운 없이 유도하면 이런 편차가 난다')
+    else:
+        print(f'    문서값 {arm_angle_doc:.1f}° 와 일치 '
+              f'(차이 {p["arm_angle"] - arm_angle_doc:+.3f}°)')
+        r_centre = contact_r - p['wheel_dia'] / 2.0      # 휠 중심의 관축 반경
+    rim = max(np.hypot(y, r_centre + p['wheel_dia'] / 2.0 - (
+        (p['wheel_crown_r'] - np.sqrt(max(p['wheel_crown_r'] ** 2 - y ** 2, 0.0)))
+        if p.get('wheel_crown_r') else 0.0))
+        for y in np.linspace(-p['wheel_width'] / 2.0, p['wheel_width'] / 2.0, 101))
+    print(f'    트레드 최대 반경        {rim:.3f} mm   (관벽 {PIPE_ID / 2.0:.1f} 이하여야 함)')
     print(f'  휠 접촉 반경            {contact_r:.2f} mm   (DN100 내반경 50.0)')
     print(f'  암 각도 한계            {meta["arm_angle_compressed"] - p["arm_angle"]:+.2f}° '
           f"~ {meta['arm_angle_extended'] - p['arm_angle']:+.2f}°  (스트로크 ±6mm)")

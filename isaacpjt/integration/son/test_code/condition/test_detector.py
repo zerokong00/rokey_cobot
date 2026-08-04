@@ -35,7 +35,19 @@ def _mark(arr, cells, value):
 
 
 def main():
-    meta = json.loads((SCENES / "scenes_meta.json").read_text())
+    meta_path = SCENES / "scenes_meta.json"
+    if not meta_path.is_file():
+        print("[중단] 시험 장면이 없다. 먼저 만들 것:")
+        print(f"    cd {SCENES.parent}  &&  python3 make_scenes.py")
+        return 1
+    meta = json.loads(meta_path.read_text())
+    missing = [n for n in meta["scenes"]
+               if not (SCENES / f"{n}_depth.npy").is_file()]
+    if missing:
+        print(f"[중단] 장면 {len(missing)}종의 .npy 가 없다 "
+              f"(용량 때문에 배포본에서 빠진다). 먼저 만들 것:")
+        print(f"    cd {SCENES.parent}  &&  python3 make_scenes.py")
+        return 1
     det = PipeConditionDetector(meta)
     rows, ok = [], True
 

@@ -17,12 +17,39 @@ Isaac Sim 담당자가 지금 하려는 것은 통신 검증이 아니라 **"구
 
 ⚠ 이 판으로는 **ROS 통신을 검증할 수 없다.** 그것은 원본 판으로 따로 한다.
 
+## 두 가지 출력
+
+    --out  <zip>    압축 파일 (예전 방식. 직접 전달할 때)
+    --dest <디렉터리>  통합본 자리에 바로 생성 (git 방식. 지금 쓰는 것)
+
+## 한 방향만 자동이다
+
+    src/son  ──생성──▶  isaacpjt/integration/son  ──push──▶  git
+       ▲                                                     │
+       └──────── 사람이 판단해서 반영 (자동 아님) ◀──────pull──┘
+
+**`src/son` 은 읽기만 한다.** 통합본에서 무슨 일이 나든 원본에 쓰지 않는다.
+
+다만 통합본은 Isaac Sim 담당자도 직접 고친다. 그대로 재생성하면 그 수정이
+조용히 사라지므로, 생성 직전에 **무엇이 날아가는지 알려준다.** 가져오지는
+않는다 — 판단은 사람이 한다.
+
+판별은 `.generated_manifest.json` 으로 한다. 지난번 생성물의 해시를 들고
+있다가
+
+    해시가 다르다   → **저쪽이 고친 것** (경고하고 확인을 받는다)
+    매니페스트에 없다 → **저쪽이 추가한 것** (마찬가지)
+    내 쪽만 바뀐 것  → 그냥 목록으로 보여준다
+
 실행:
-  python3 tools/make_standalone.py
+  python3 tools/make_standalone.py --dest ../../isaacpjt/integration/son
   python3 tools/make_standalone.py --out ~/Downloads/이름.zip
 """
 
 import argparse
+import hashlib
+import os
+import json
 import shutil
 import subprocess
 import sys
@@ -39,8 +66,10 @@ STUB = HERE / "standalone_stub"
 DROP_DIRS = {"training", "monitor", "color_detector", "color_interfaces",
              "__pycache__", "standalone_stub"}
 # 시험 장면은 make_scenes.py 로 재생성 가능하다. 대표 몇 개만 넣는다.
+DROP_FILES = {".gitignore", ".generated_manifest.json"}
 SCENE_DIR = "test_code/condition/scenes"
 SCENE_KEEP = 6
+SCENE_META = "scenes_meta.json"
 
 PYVER_ANCHOR = "def require_isaac(who=\"\", needs_rclpy=False):"
 PYVER_PATCH = '''# ── 단독 기능확인판 ──────────────────────────────────────────────
@@ -131,6 +160,10 @@ def build(dst_root):
     for item in sorted(SON.iterdir()):
         if item.name in DROP_DIRS or item.name.endswith(".zip"):
             continue
+        # .gitignore 는 **원본 저장소 사정**이다. 통합본에 딸려가면 거기서
+        # 시험 장면(.npy)을 가려 저쪽이 test_detector.py 를 못 돌린다.
+        if item.name in DROP_FILES:
+            continue
         if item.is_dir():
             shutil.copytree(item, son / item.name,
                             ignore=shutil.ignore_patterns(
@@ -141,10 +174,14 @@ def build(dst_root):
     # 시험 장면은 대표 몇 개만
     scenes = son / SCENE_DIR
     if scenes.is_dir():
-        keep = sorted(p.name for p in scenes.iterdir())[:SCENE_KEEP]
-        for p in scenes.iterdir():
-            if p.name not in keep:
-                p.unlink()
+        # scenes_meta.json 은 **반드시** 남긴다. 이름순으로 자르면 뒤로 밀려
+        # 잘려나가고, 그러면 test_detector.py 가 FileNotFoundError 로 죽는다.
+        keep = {SCENE_META} | set(
+            sorted(q.name for q in scenes.iterdir()
+                   if q.name != SCENE_META)[:SCENE_KEEP])
+        for q in scenes.iterdir():
+            if q.name not in keep:
+                q.unlink()
 
     # 대역 모듈을 얹는다
     shutil.copytree(STUB, son / "standalone",
@@ -193,13 +230,80 @@ def verify(son):
     return checks
 
 
+MANIFEST = ".generated_manifest.json"
+
+
+def sha(path):
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()[:16]
+
+
+def manifest_of(root):
+    return {str(p.relative_to(root)): sha(p)
+            for p in sorted(root.rglob("*"))
+            if p.is_file() and p.name != MANIFEST}
+
+
+def survey(dest):
+    """통합본에 이미 있는 것 중 **우리가 만들지 않은 변경**을 찾는다.
+
+    가져오지 않는다. 무엇이 덮이는지 알려주기만 한다.
+    """
+    if not dest.is_dir():
+        return None, [], []
+    mf_path = dest / MANIFEST
+    if not mf_path.is_file():
+        return "매니페스트 없음", [], []
+    old = json.loads(mf_path.read_text())
+    now = manifest_of(dest)
+    changed = sorted(f for f, h in now.items()
+                     if f in old and old[f] != h)
+    added = sorted(f for f in now if f not in old)
+    return None, changed, added
+
+
+def report_overwrite(dest, assume_yes):
+    note, changed, added = survey(dest)
+    if note == "매니페스트 없음":
+        print(f"  [주의] {dest} 에 매니페스트가 없다 — 이 스크립트가 만든 것이")
+        print("         아니거나 첫 생성이다. 무엇이 덮이는지 판별할 수 없다.")
+    if not changed and not added:
+        return True
+    print("\n" + "!" * 74)
+    print("  통합본에만 있는 변경 — 재생성하면 사라진다")
+    print("!" * 74)
+    for f in changed:
+        print(f"    수정됨  {f}")
+    for f in added:
+        print(f"    추가됨  {f}")
+    print("\n  자동으로 가져오지 않는다. src/son 에 반영할지는 사람이 정한다.")
+    print("  확인 방법:  diff src/son/<파일>  <통합본>/<파일>")
+    if assume_yes:
+        print("  --yes 가 주어져 그대로 진행한다.")
+        return True
+    try:
+        ans = input("\n  덮어쓰고 계속할까? [y/N] ").strip().lower()
+    except EOFError:
+        ans = ""
+    return ans == "y"
+
+
 def main():
-    ap = argparse.ArgumentParser(description="단독 기능확인판 zip 생성")
+    ap = argparse.ArgumentParser(description="단독 기능확인판 생성")
+    ap.add_argument("--dest", default=None,
+                    help="통합본 디렉터리에 바로 생성 (예: "
+                         "../../isaacpjt/integration/son)")
+    ap.add_argument("--yes", action="store_true",
+                    help="덮어쓰기 확인을 묻지 않는다")
     ap.add_argument("--out", default=str(
         Path.home() / "Downloads" /
         f"협동3_son_단독확인판_{date.today():%Y%m%d}.zip"))
     a = ap.parse_args()
     out = Path(a.out).expanduser()
+    dest = Path(a.dest).expanduser().resolve() if a.dest else None
+
+    if dest and not report_overwrite(dest, a.yes):
+        print("  중단했다. 통합본은 그대로다.")
+        return 1
 
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
@@ -220,20 +324,37 @@ def main():
         for p in son.rglob("__pycache__"):
             shutil.rmtree(p, ignore_errors=True)
 
-        out.parent.mkdir(parents=True, exist_ok=True)
-        if out.exists():
-            out.unlink()
-        n = 0
-        with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
-            for p in sorted(son.rglob("*")):
-                if p.is_file():
-                    z.write(p, p.relative_to(root))
-                    n += 1
+        if dest:
+            # 통합본 자리에 통째로 갈아끼운다. src/son 에는 쓰지 않는다.
+            if dest.is_dir():
+                shutil.rmtree(dest)
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copytree(son, dest)
+            (dest / MANIFEST).write_text(
+                json.dumps(manifest_of(dest), indent=2, ensure_ascii=False))
+            n = sum(1 for q in dest.rglob("*") if q.is_file())
+            size = sum(q.stat().st_size for q in dest.rglob("*") if q.is_file())
+            target, unit = dest, f"{size / 1e6:.1f} MB"
+        else:
+            out.parent.mkdir(parents=True, exist_ok=True)
+            if out.exists():
+                out.unlink()
+            n = 0
+            with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
+                for q in sorted(son.rglob("*")):
+                    if q.is_file():
+                        z.write(q, q.relative_to(root))
+                        n += 1
+            target, unit = out, f"{out.stat().st_size / 1e6:.1f} MB"
 
     print("=" * 74)
-    print(f"  {out}")
-    print(f"  {out.stat().st_size / 1e6:.1f} MB   파일 {n}개")
+    print(f"  {target}")
+    print(f"  {unit}   파일 {n}개")
     print("  ⚠ 이 판으로는 PC1↔PC2 ROS 통신을 검증할 수 없다")
+    if dest:
+        rel = os.path.relpath(dest, Path.cwd())
+        print(f"\n  다음: git add {rel} && git diff --staged 로 확인 후 커밋")
+        print("  src/son 은 건드리지 않았다")
     print("=" * 74)
     return 0
 

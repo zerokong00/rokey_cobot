@@ -111,7 +111,14 @@ def load_stl(path):
     return pts * MM, inv.reshape(n, 3)
 
 
-world = World(stage_units_in_meters=1.0)
+# 🚨 물리 스텝을 기본값(1/60)으로 두면 안 된다. 설계 v3 §12.2 가
+# "1/240 이상 (불안정 시 1/500)" 을 지정한다. 휠 반경 10mm 에
+# contactOffset 0.0005 규모의 접촉이라 60Hz 로는 접촉이 풀리지 않는다.
+# 2026-08-04 실측: dt 만 1/240 으로 바꿔 전진 0.0mm → 42.9mm.
+PHYSICS_DT = 1.0 / 240.0
+RENDER_DT = 1.0 / 60.0
+world = World(stage_units_in_meters=1.0,
+              physics_dt=PHYSICS_DT, rendering_dt=RENDER_DT)
 stage = world.stage
 UsdGeom.SetStageUpAxis(stage, UsdGeom.Tokens.z)
 UsdGeom.Xform.Define(stage, "/World")

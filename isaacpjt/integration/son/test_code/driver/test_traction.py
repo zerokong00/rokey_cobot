@@ -28,6 +28,7 @@ Isaac Sim 에서 확인해야 한다. 여기서 보는 것은 "예압이 0 이�
 
 import json
 import math
+import re
 import sys
 from pathlib import Path
 
@@ -39,10 +40,24 @@ META = json.loads((SON / "spec" / "parts_meta.json").read_text())
 MM = 0.001
 WHEEL_R = META["wheel_r"] * MM
 N_WHEEL = 6
-FRICTION = 0.7
-PRELOAD_N = 9.0                  # robot/articulate.py WHEEL_PRELOAD_N
 MASS_KG = 0.500
 GRAVITY = 9.81
+
+
+def from_source(path, name, cast=float):
+    """상수를 **소스에서 읽는다.** 여기 베껴 두면 소스가 바뀌었을 때
+    시험은 옛 값으로 통과해 버린다 — 실제로 마찰이 0.70 → 0.30 으로
+    바뀌었을 때 이 시험이 아무 말도 안 했다."""
+    src = (SON / path).read_text()
+    m = re.search(rf"^{name}\s*=\s*([-\d.eE/*+ ]+)", src, re.M)
+    if not m:
+        raise SystemExit(f"[중단] {path} 에서 {name} 을 못 찾았다")
+    return cast(eval(m.group(1), {"__builtins__": {}}, {}))
+
+
+FRICTION = from_source("robot/articulate.py", "WHEEL_FRICTION_STATIC")
+PRELOAD_N = from_source("robot/articulate.py", "WHEEL_PRELOAD_N")
+TORQUE_FRACTION = from_source("robot/articulate.py", "WHEEL_TORQUE_FRACTION")
 TARGET_SPEED_MPS = 0.05
 
 
@@ -68,6 +83,8 @@ def main():
     print("=" * 78)
     print(f"  바퀴 반경 {WHEEL_R * 1000:.1f}mm  x{N_WHEEL}   마찰계수 {FRICTION}")
     print(f"  설계 예압 {PRELOAD_N:.1f} N/륜   질량 {MASS_KG * 1000:.0f} g")
+    print(f"  ※ 마찰·예압·토크비율은 robot/articulate.py 에서 읽는다 "
+          f"(베끼지 않는다)")
 
     need = required_force_n()
     print(f"\n  수직 상승에 필요한 힘 {need:.2f} N")
@@ -98,7 +115,23 @@ def main():
     print(f"     견인력 {f:.2f} N  vs  필요 {need:.2f} N   "
           f"여유 {f / need:.1f}배  {'OK' if good else 'FAIL'}")
 
-    print("\n  ③ 최소 필요 예압")
+    print("\n  ③ 구동 토크가 마찰원을 다 쓰면 안 된다")
+    limit = wheel_max_torque(PRELOAD_N)
+    drive = limit * TORQUE_FRACTION
+    print(f"     마찰 한계 {limit * 1000:.2f} mN·m  →  구동 상한 "
+          f"{drive * 1000:.2f} mN·m  ({TORQUE_FRACTION * 100:.0f}%)")
+    print(f"     남는 횡방향 여력 {(1 - TORQUE_FRACTION) * 100:.0f}% "
+          f"— 0 이면 관 중심을 못 잡고 잭나이프가 난다")
+    good = 0.3 <= TORQUE_FRACTION <= 0.6
+    ok.append(good)
+    print(f"     40~50% 권장 범위인가  {'OK' if good else 'FAIL'}")
+    push = N_WHEEL * drive / WHEEL_R
+    good = push >= need
+    ok.append(good)
+    print(f"     구동이 낼 수 있는 힘 {push:.2f} N  vs  필요 {need:.2f} N  "
+          f"여유 {push / need:.1f}배  {'OK' if good else 'FAIL — 못 오른다'}")
+
+    print("\n  ④ 최소 필요 예압")
     p_min = need / (N_WHEEL * FRICTION)
     print(f"     {p_min:.2f} N/륜 (설계 {PRELOAD_N:.1f} N 의 "
           f"{p_min / PRELOAD_N * 100:.0f}%)")

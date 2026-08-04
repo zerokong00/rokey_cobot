@@ -123,8 +123,31 @@ ARM_MAX_FORCE = 1.5 * ARM_K_NM_RAD * math.radians(
 WAIST_K_USD = WAIST_SPRING_NM_RAD * DEG
 WAIST_C_USD = WAIST_K_USD / 10.0
 
-WHEEL_FRICTION = 0.7
-WHEEL_MAX_TORQUE = WHEEL_FRICTION * WHEEL_PRELOAD_N * WHEEL_R
+# 설계 v3 §12.3 은 마찰을 **두 벌**로 나눈다. 하나로 뭉뚱그리면 안 된다.
+#   physics_flooded.yaml  정찰기  static 0.30 / dynamic 0.25  (관에 물이 찬 상태)
+#   physics_drained.yaml  수리기  static 0.40 / dynamic 0.35  (배수 후)
+# 0.70 을 쓰고 있었다 — 문서에서 옮겨오지 않은 값이다.
+WHEEL_FRICTION_STATIC = 0.40
+WHEEL_FRICTION_DYNAMIC = 0.35
+WHEEL_FRICTION = WHEEL_FRICTION_STATIC        # 견인력 계산은 정지마찰 기준
+
+# 마찰이 낼 수 있는 최대 접선력에 대응하는 토크. **상한이지 목표가 아니다.**
+WHEEL_FRICTION_LIMIT_NM = WHEEL_FRICTION * WHEEL_PRELOAD_N * WHEEL_R
+
+# 🚨 구동 토크를 마찰 한계까지 쓰면 안 된다. 마찰은 원(circle)이라 구동이
+# 전부 소비하면 **횡방향 안내력이 0** 이 되어 로봇이 관 중심을 못 잡고
+# 중앙 관절이 스토퍼까지 접힌다(잭나이프). 팀 실측 주석:
+#   "0.034(94%)로 걸면 마찰 원을 구동이 다 써서 횡방향 안내력이 0 —
+#    주행 시작 2초 만에 중앙 관절이 ±55° 스토퍼로 잭나이프"
+# 40~50% 를 남긴다.
+WHEEL_TORQUE_FRACTION = 0.45
+WHEEL_MAX_TORQUE = WHEEL_FRICTION_LIMIT_NM * WHEEL_TORQUE_FRACTION
+
+# 🚨 USD 각도 드라이브의 damping 단위는 **N·m / (deg/s)** 다. 여기서 쓰려던
+# 뜻은 "속도 오차 5 rad/s 에서 최대 토크" 였는데 변환을 빼먹어 57.3배 컸다.
+# stiffness 쪽은 ARM_K_USD = K * DEG 로 제대로 변환하고 있어 둘이 어긋나 있었다.
+WHEEL_DAMPING_REF_RAD_S = 5.0
+WHEEL_DAMPING = WHEEL_MAX_TORQUE / WHEEL_DAMPING_REF_RAD_S * DEG
 WHEEL_DAMPING = WHEEL_MAX_TORQUE / 5.0
 
 CONTACT_OFFSET = 0.0005
@@ -170,7 +193,14 @@ def quat_x(deg):
     return Gf.Quatf(Gf.Rotation(Gf.Vec3d(1, 0, 0), deg).GetQuat())
 
 
-world = World(stage_units_in_meters=1.0)
+# 🚨 물리 스텝을 기본값(1/60)으로 두면 안 된다. 설계 v3 §12.2 가
+# "1/240 이상 (불안정 시 1/500)" 을 지정한다. 휠 반경 10mm 에
+# contactOffset 0.0005 규모의 접촉이라 60Hz 로는 접촉이 풀리지 않는다.
+# 2026-08-04 실측: dt 만 1/240 으로 바꿔 전진 0.0mm → 42.9mm.
+PHYSICS_DT = 1.0 / 240.0
+RENDER_DT = 1.0 / 60.0
+world = World(stage_units_in_meters=1.0,
+              physics_dt=PHYSICS_DT, rendering_dt=RENDER_DT)
 stage = world.stage
 UsdGeom.SetStageUpAxis(stage, UsdGeom.Tokens.z)
 UsdGeom.Xform.Define(stage, "/World")
@@ -180,8 +210,8 @@ UsdGeom.Scope.Define(stage, f"{ROBOT}/PhysicsMaterials")
 WHEEL_MAT = f"{ROBOT}/PhysicsMaterials/WheelMaterial"
 _m = UsdPhysics.MaterialAPI.Apply(
     UsdShade.Material.Define(stage, WHEEL_MAT).GetPrim())
-_m.CreateStaticFrictionAttr(WHEEL_FRICTION)
-_m.CreateDynamicFrictionAttr(WHEEL_FRICTION)
+_m.CreateStaticFrictionAttr(WHEEL_FRICTION_STATIC)
+_m.CreateDynamicFrictionAttr(WHEEL_FRICTION_DYNAMIC)
 _m.CreateRestitutionAttr(0.0)
 
 

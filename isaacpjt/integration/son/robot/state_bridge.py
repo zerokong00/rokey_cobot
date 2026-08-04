@@ -88,19 +88,20 @@ def roll_from_gravity(lin_acc):
     로봇 로컬 X 가 관 축이므로 중력의 YZ 성분이 '아래쪽'을 가리킨다.
     로봇이 어떻게 투입되었든 중력은 변하지 않아 기준이 흔들리지 않는다.
 
-    부호 규약 확정(2026-08-04 실측). Isaac Sim 의 lin_acc 는 **고유가속도**
-    규약이라 정지 상태에서 위쪽으로 +9.81 을 읽는다(중력 벡터가 아니다).
+    🚨 부호 규약 확정(2026-08-04 실측). Isaac Sim 의 `lin_acc` 는 **고유가속도**
+    규약이라 정지 상태에서 위쪽으로 +9.81 을 읽는다 — 중력 벡터가 아니다.
     롤 θ 로 굴리면 lin_acc = (0, g·sinθ, g·cosθ) 이므로 θ = atan2(gy, gz) 다.
     z 에 음수를 붙이면 180°−θ 가 되어 **정립 상태에서 180° 를 보고한다.**
     그러면 토치 링 J1 을 정반대로 돌려 엉뚱한 곳을 용접한다.
 
-    월드에 고정 조인트로 붙여 정지시킨 뒤 실측한 값(자유낙하 상태에서는
-    가속도계가 0 을 읽어 측정 자체가 안 된다):
+    월드 고정 조인트로 정지시켜 실측한 값(자유낙하에서는 가속도계가 0 을 읽어
+    측정 자체가 안 된다):
 
-        적용 롤   lin_acc                  atan2(gy, gz)
-          0°     (0,  0.000, +9.810)          0.00°
-        +30°     (0, +4.905, +8.496)        +30.00°
-        -45°     (0, -6.937, +6.937)        -45.00°
+        적용 롤   lin_acc                atan2(gy,-gz) 옛   atan2(gy, gz) 지금
+          0°     (0,  0.000, +9.810)        +180.00°            0.00°
+        +30°     (0, +4.905, +8.496)        +150.00°          +30.00°
+        -45°     (0, -6.937, +6.937)        -135.00°          -45.00°
+        +90°     (0, +9.810,  0.000)         +90.00°          +90.00°
     """
     a = np.asarray(lin_acc, dtype=float).reshape(-1)
     if a.size < 3:
@@ -191,12 +192,16 @@ class RobotStateBridge(Node):
 def attach(art, hz=50.0, robot_path=ROBOT, with_imu=True, imu=None):
     """시뮬 루프를 도는 쪽에서 호출한다. rclpy 는 호출자가 init 해 둘 것.
 
-    ⚠ imu 는 **world.reset() 전에** 만들어 여기로 넘겨야 한다. reset 뒤에
+    🚨 `imu` 는 **world.reset() 전에** 만들어 여기로 넘겨야 한다. reset 뒤에
     붙이면 센서가 한 번도 갱신되지 않는다 — physics_step 이 0 에 머물고
-    lin_acc 가 [0,0,0] 이라 /imu_roll, /imu_yaw_rate 가 항상 0 으로 나간다
-    (2026-08-04 실측: reset 뒤 부착 physics_step=0, 앞 부착 52).
-    롤을 모르면 결함의 원주 위치를 모르고, 토치 링 J1 을 어디로 돌릴지
-    정할 수 없다.
+    lin_acc 가 [0,0,0] 이라 /imu_roll, /imu_yaw_rate 가 항상 0 으로 나간다.
+
+        부착 시점        physics_step   lin_acc
+        reset 뒤 (옛)        0          [0,0,0]
+        reset 앞 (지금)     52          값이 나온다
+
+    롤을 모르면 결함의 원주 위치를 모르고 토치 링 J1 을 어디로 돌릴지 정할 수
+    없다. 2026-08-04 실측으로 확인됐다.
     """
     if imu is None and with_imu:
         print("[경고] reset() 이후에 IMU 를 만들면 갱신되지 않는다. "
@@ -225,7 +230,7 @@ def main():
     art = SingleArticulation(prim_path=ROBOT, name="pipe_robot_state")
     world.scene.add(art)
 
-    # IMU 는 reset() 전에 붙여야 갱신된다(attach() 주석 참조)
+    # IMU 는 reset() 전에 붙여야 갱신된다 (attach() 주석 참조)
     imu = None
     try:
         imu = attach_imu(ROBOT)

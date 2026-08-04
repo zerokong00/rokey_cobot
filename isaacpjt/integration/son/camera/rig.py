@@ -133,8 +133,8 @@ def load_stl(path):
     return pts * MM, inv.reshape(n, 3)
 
 
-# 하우징(깊이 8mm)을 센서 뒤로 물리는 거리. 4mm 면 앞면이 센서와 같은
-# 평면이라 스치므로 1mm 여유를 더한다.
+# 하우징(깊이 8mm)을 센서 뒤로 물리는 거리. 4mm 면 앞면이 센서와 같은 평면이라
+# 스치므로 1mm 여유를 더한다.
 HOUSING_BACK_M = 5.0 * MM
 
 
@@ -182,11 +182,10 @@ def make_camera(stage, name, spec):
 
     base = f"{ROBOT}/{spec['link']}/{name}"
     UsdGeom.Xform.Define(stage, base)
-    # 🚨 하우징을 센서와 같은 좌표에 두면 안 된다. 하우징은 깊이 8mm 상자라
-    # centre 를 중심으로 ±4mm 를 감싸고, 그 안에 조명까지 갇혀 렌즈 앞을
-    # 통째로 막는다. 2026-08-04 실측: 하우징을 숨기니 RGB 평균이 0.00 에서
-    # 91.42 로 살아났다(Depth 는 본체 메시가 따로 막고 있어 불변이었다).
-    # 센서가 하우징 앞면보다 앞에 오도록 뒤로 물린다.
+    # 🚨 하우징을 센서와 같은 좌표에 두면 안 된다. 깊이 8mm 상자라 centre 를
+    # 중심으로 ±4mm 를 감싸고 조명까지 그 안에 갇혀 렌즈 앞을 통째로 막는다.
+    # 2026-08-04 실측: 하우징만 숨겨도 RGB 평균 0.00 → 91.42.
+    # (Depth 는 불변이었다 — 시야를 막은 것은 본체 메시로 별개 결함이었다)
     add_housing(stage, f"{base}/housing",
                 centre - np.array([forward * HOUSING_BACK_M, 0.0, 0.0]),
                 forward < 0)
@@ -416,7 +415,15 @@ def main():
         # defaultPrim 이 없으면 다른 스테이지에서 이 USD 를 reference 할 때
         # 경로가 안 풀린다.
         stage.SetDefaultPrim(stage.GetPrimAtPath("/World"))
-        stage.Export(str(OUT_USD))
+        # 🚨 stage.Export() 를 쓰면 안 된다. 그것은 합성 결과를 **단일 레이어로
+        # 구워버려** robot_2seg.usd 로의 참조가 사라진다. 그러면
+        #   articulate.py 를 다시 돌려 조인트 드라이브를 바꿔도
+        #   curve_demo.py 는 옛날에 구워진 이 파일을 읽어 아무것도 안 바뀐다.
+        # 2026-08-04 실기에서 "센터링 0.01→0.3 으로 바꿨는데 궤적이 한 자리도
+        # 안 변한다" 는 현상이 이것이다. 물리 dt·마찰은 curve_demo.py 안에서
+        # 직접 걸므로 반영되어, 드라이브만 안 먹는 것처럼 보였다.
+        # 루트 레이어만 내보내면 참조가 살아 있어 원본 변경이 흘러든다.
+        stage.GetRootLayer().Export(str(OUT_USD))
         print("=" * 76)
         print(f"\n저장 완료: {OUT_USD}")
         print("  포함  : 로봇 물리 + 카메라 프림 + 조명 + 하우징")
