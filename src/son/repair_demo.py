@@ -42,6 +42,27 @@
    `pipe/crack_inject.py` 몫이고 파라메트릭 관 재생성 방식이라 이 usda 배관에는
    아직 못 얹었다.
 
+물 모드 두 가지 — 목적이 다르다
+  --water   PBD 입자. **보이는 물**. 누수가 눈에 보이고 무겁다
+  --fluid   해석적 유체력. **느껴지는 물**. 항력·부력만 넣고 연산은 공짜다
+            설계 v3 §4.4 모델 (F_drag = ½ρ·C_d,eff·A·Δv|Δv|, F_buoy = 0.36×중량)
+            🚨 둘을 같이 주면 항력이 이중 계상되므로 --fluid 를 끈다
+
+주행 속도
+  SPEED_MPS=0.15  기본 0.15 m/s (설계 0.05 의 3배)
+                  6배(0.30)는 카메라 10Hz 에서 프레임당 30mm 라 결함 38mm 를
+                  1.3 프레임에만 잡아 검출을 놓친다. 3배가 상한이다.
+  🚨 속도를 올리면 contactOffset 이 자동으로 따라 넓어진다
+     (한 스텝 이동 > 감지폭이면 바퀴가 관벽을 뛰어넘어 박힌다)
+     0.15 m/s @240Hz → 0.625mm/step → contactOffset 0.75mm
+
+연산량 조절 (물 모드가 무거울 때 — 물리·입자 설정은 안 건드린다)
+  RECYCLE_HZ=15  재투입 호출 주기. 기본 15. 60 이 옛 동작
+                 (입자 위치를 GPU↔CPU 로 왕복시키는 비용이라 호출 횟수가 곧 비용)
+  ISO_PASSES=2   물 표면 다듬기 횟수. 기본 2. 8 이 옛 동작, 0 이면 isosurface 끔
+  예) RECYCLE_HZ=60 ISO_PASSES=8 isaac_python repair_demo.py --water   # 옛 설정
+  실행 중 5초마다 `물리 xx step/s` 가 찍히므로 조합을 바꿔 가며 비교할 것.
+
 실행 (Isaac 내장 rclpy 환경 — HANDOFF.md 참조):
   isaac_python repair_demo.py --headless            # 로그로 검증
   DISPLAY=:1 isaac_python repair_demo.py --shots    # GUI + 사진 저장 (out/)
@@ -58,12 +79,35 @@ from pathlib import Path
 HEADLESS = "--headless" in sys.argv
 SHOTS = "--shots" in sys.argv          # 카메라 프레임 저장 (GUI 필요)
 HOLD = "--hold" in sys.argv            # 끝나고 창을 열어 둔다
-NO_TORCH = "--no-torch" in sys.argv    # 대조군: 토치 없이 주행만
+# 🔑 **토치는 항상 붙어 있다** (2026-08-05 방침). 정찰기/수리기를 나누지 않고
+# 한 대가 점검·수리를 다 하므로 "토치 없는 로봇" 이라는 운용 형태가 없다.
+# --no-torch 는 **대조군 실험용**이다 — 주행 이상이 토치 탓인지 가리는 용도.
+# 기준 질량은 토치 포함 876g (본체 813 + 토치 63) 이고, 안착 후퇴량도
+# 토치 있는 74mm 가 기준이다(없으면 44mm).
+NO_TORCH = "--no-torch" in sys.argv
 # 토치 형상·질량은 두고 **접촉만** 끈다(콜라이더를 지우면 관성이 0 이 되어 NaN).
 TORCH_NOCOLLIDE = "--torch-nocollide" in sys.argv
 # --water: 만관 조건 — 투명 배관 + 흐르는 PBD 물. 파티클은 GPU 물리 전용이라
 # contactOffset·시작 위치·마찰이 건식과 달라진다(아래 각 지점 주석 참조).
 WATER = "--water" in sys.argv
+# --fluid: 만관 유체력을 **해석적으로** 건다(입자 없이). 설계 v3 §4.4 모델을
+# dongmin `fluid_force_demo.py` 에서 옮겨 왔다.
+#   F_drag = ½ρ·C_d,eff·A·(v_flow − v_robot)|v_flow − v_robot|   (관 축 방향)
+#   F_buoy = 부력비 × 중량                                        (연직 위)
+# 🚨 --water 와 같이 쓰면 **항력이 두 번 걸린다** — 입자 충돌로 이미 밀리는데
+#    해석 힘을 또 더하는 셈이다. 같이 주면 해석 쪽을 끈다.
+FLUID = "--fluid" in sys.argv
+# 🔑 **만관 상태에서 용접한다** (2026-08-05 방침). 정찰기/수리기를 나누지 않고
+# 한 대가 점검하다 결함을 만나면 그 자리에서 고치고 계속 간다. 물을 빼는
+# 단계가 없으므로 마찰은 **끝까지 만관값(0.30/0.25)** 이다.
+#   FLOODED 는 "관에 물이 찼는가" 다 — 입자(--water)든 해석적 힘(--fluid)이든
+#   물이 있으면 참이다. 예전에는 --water 만 봐서 --fluid 만 줬을 때 항력은
+#   만관인데 마찰은 배수(0.40) 로 잡히는 불일치가 있었다.
+FLOODED = WATER or FLUID
+if FLUID and WATER:
+    print("[경고] --fluid 와 --water 를 같이 줬다. 입자 충돌이 이미 항력을 "
+          "만들므로 해석적 유체력은 끈다(이중 계상 방지).")
+    FLUID = False
 STEPS = 9000
 if "--steps" in sys.argv:
     STEPS = int(sys.argv[sys.argv.index("--steps") + 1])
@@ -80,6 +124,8 @@ from pxr import (Gf, PhysxSchema, Sdf, UsdGeom, UsdLux,   # noqa: E402
                  UsdPhysics, UsdShade)
 
 MM = 0.001
+# 물리 스텝은 속도·접촉 계산에 먼저 필요하므로 여기서 읽는다.
+PHYSICS_HZ_PRE = float(os.environ.get("PHYSICS_HZ", 240))
 SON = Path(__file__).resolve().parent
 ROBOT_USDA = str(SON / "robot_bellows" / "robot_bellows.usda")
 PIPE_USDA = str(SON / "pipe" / "pipe_elbow_lr150.usda")
@@ -108,7 +154,7 @@ S_TOTAL = S_IN + S_ARC + S_OUT            # 코스 중심선 총 길이 0.921 m
 # — 휠은 193 deg/s 로 돌지만 전진 0. 여유를 두고 관 안쪽에서 시작한다.
 # 물 모드는 GPU 기본 contactOffset(0.02) 을 쓰므로 관 끝 링과 겹치면 관통 해소
 # 임펄스로 사출된다(yongbin 12차 실측) → 더 안쪽에서 시작한다.
-START_X = -0.18 if WATER else -0.22
+START_X = -0.18 if WATER else -0.22   # 입자 모드만 더 안쪽
 DEFECT_X = -0.05       # 결함 축방향 위치 (직관은 x=0 에서 곡관으로 넘어간다)
 # 결함 시계각 — +Z(위)에서 +Y 쪽으로 잰다. **180° = 바닥.**
 # 바닥에 둔 이유: 물이 실제로 새는 것을 눈으로 보려면 중력 방향이어야 한다.
@@ -125,11 +171,51 @@ DEFECT_CLOCK_DEG = 180.0
 #    (실효 11.8mm < 필요 19.2mm). 입자를 바꾸면 이 값도 다시 구할 것.
 LEAK_PORT_D = 0.0381
 
+# ── 만관 유체력 (--fluid) : 설계 v3 §4.4, dongmin fluid_force_demo 모델 ──
+# 파티클을 안 쓰고 힘만 넣으므로 **연산이 사실상 공짜다.**
+# 🔑 설계 v3 §12.3 physics_flooded.yaml 의 **확정값을 그대로 쓴다.**
+#    dongmin 은 bbox 에서 유도했는데(임시 로봇이라 크기를 몰라서), 이 로봇에
+#    그 방식을 쓰면 bbox 가 관을 거의 채워 폐색률 β 가 0.6~0.8 로 튀고
+#    C_d,eff = C_d/(1−β)² 가 7~17 로 폭주해 항력이 40N 까지 나온다.
+#    β 보정식은 그런 고폐색 영역에서 성립하지 않는다. 설계 확정값이 옳다.
+RHO = 1000.0
+G = 9.81
+V_FLOW_DESIGN = 0.855       # m/s (매닝, S=1/100)
+A_FRONTAL = 2.7e-3          # m² — 설계 확정
+CD_EFF = 2.32               # 설계 확정 (β 0.34 에서 유도된 값)
+V_DISP = 1.8e-4             # m³ 배수 체적
+ADDED_MASS = 0.09           # kg 부가질량 (지금은 기록만, 미적용)
+# 유속 부호: 물은 출구→입구로 흐른다(로봇 진행 반대) = 역류 주행.
+# 로봇 진행이 월드 +X(입구 직관)이므로 유속은 −X 다.
+V_FLOW_SIGNED = -V_FLOW_DESIGN
+
 # ── 로봇 (usda 실측) ────────────────────────────────────────────────
 WHEEL_R = 0.010
 SEG_GAP = 0.076        # seg0 z=0 → seg1 z=-0.076 (seg1 이 앞)
-TARGET_SPEED_MPS = 0.05
+
+# 주행 속도. 설계 기준은 0.05 m/s 였으나 시연이 너무 느려 **3배**로 올렸다.
+# 처음에 6배(0.30)로 올렸다가 되돌렸다 — 검출과 충돌해서다:
+#   카메라 10Hz 에서 0.30 m/s 면 프레임당 30mm 전진하는데 결함이 38mm 라
+#   화면에 잡히는 것이 1.3 프레임뿐이다. 한 장 놓치면 그냥 지나간다.
+#   0.15 m/s 면 프레임당 15mm → 2.5 프레임에 걸린다.
+# SPEED_MPS 로 바꿀 수 있다.
+TARGET_SPEED_MPS = float(os.environ.get("SPEED_MPS", 0.15))
 SPIN_DEG_S = math.degrees(TARGET_SPEED_MPS / WHEEL_R)
+
+# 🚨 속도를 올리면 **접촉 감지폭도 같이 넓혀야 한다.**
+# 엔진은 뚝뚝 끊어 계산하므로 한 스텝 이동이 contactOffset 보다 크면
+# 바퀴가 감지 밴드를 통째로 뛰어넘어 관벽에 박히거나 뚫고 나간다.
+#
+#     0.05 m/s @240Hz → 0.208mm/step   (0.5mm 의 0.42배)  안전
+#     0.15 m/s @240Hz → 0.625mm/step   (0.5mm 의 1.25배)  ← 이미 뛰어넘는다
+#     0.30 m/s @240Hz → 1.250mm/step   (0.5mm 의 2.50배)
+#
+# 물리 Hz 를 올리면 연산량이 그만큼 늘어 시연이 더 버벅인다. 대신
+# **감지 밴드를 넓힌다** — restOffset 은 0 이라 바퀴가 멈추는 자리는
+# 그대로고, "미리 보는 거리"만 늘어나므로 값이 싸다.
+# 설계 §12.2 가 경고한 Isaac 기본값 0.02(20mm)의 1/13 수준이다.
+CONTACT_OFFSET = max(0.0005, 1.2 * TARGET_SPEED_MPS / PHYSICS_HZ_PRE)
+REST_OFFSET = 0.0
 
 # ── 토치 (son parts_meta) ───────────────────────────────────────────
 RING_R_OUT = TORCH["ring_r_out"] * MM        # 0.030
@@ -139,7 +225,7 @@ J2_STROKE = TORCH["j2_stroke_mm"] * MM       # 0.008
 STOW_R = TORCH["stow_radius_mm"] * MM        # 0.040
 REACH_R = TORCH["reach_radius_mm"] * MM      # 0.048
 
-PHYSICS_HZ = float(os.environ.get("PHYSICS_HZ", 240))
+PHYSICS_HZ = PHYSICS_HZ_PRE
 PHYSICS_DT = 1.0 / PHYSICS_HZ
 
 ROBOT = "/World/Robot"
@@ -248,11 +334,30 @@ _pipe_mesh.GetFaceVertexCountsAttr().Set([3] * len(_kept))
 print(f"[준비] 배관 바닥에 관통 개구 ø{LEAK_PORT_D * 1000:.1f}mm — "
       f"삼각형 {int(_hole.sum())}개 제거 ({len(_idx)} → {len(_kept)})")
 
-# 물리 재질. 만관(정찰) 0.30/0.25 vs 배수(수리) 0.40/0.35 — v3 §12.3
+# 속도에 맞춰 감지 밴드를 넓힌다 — usda 에 박힌 0.0005 를 덮어쓴다.
+_n_off = 0
+for _p in stage.Traverse():
+    if _p.HasAPI(UsdPhysics.CollisionAPI) or _p.IsA(UsdGeom.Mesh):
+        _px = PhysxSchema.PhysxCollisionAPI.Apply(_p)
+        _px.CreateContactOffsetAttr(CONTACT_OFFSET)
+        _px.CreateRestOffsetAttr(REST_OFFSET)
+        _n_off += 1
+print(f"[준비] 주행 {TARGET_SPEED_MPS * 1000:.0f} mm/s "
+      f"(한 스텝 {TARGET_SPEED_MPS / PHYSICS_HZ * 1000:.3f}mm) → "
+      f"contactOffset {CONTACT_OFFSET * 1000:.2f}mm 로 확대, 프림 {_n_off}개")
+
+# 물리 재질 — **관 상태**로 고른다(로봇 종류가 아니다. v3 §12.3).
+#   만관 physics_flooded  0.30 / 0.25   ← 물속 용접이므로 시연은 이쪽
+#   배수 physics_drained  0.40 / 0.35   ← 물 없이 돌릴 때(건식 대조군)
+FRICTION_STATIC = 0.30 if FLOODED else 0.40
+FRICTION_DYNAMIC = 0.25 if FLOODED else 0.35
 _pm = UsdPhysics.MaterialAPI.Apply(
     UsdShade.Material.Define(stage, "/World/PipePhysMat").GetPrim())
-_pm.CreateStaticFrictionAttr(0.30 if WATER else 0.40)
-_pm.CreateDynamicFrictionAttr(0.25 if WATER else 0.35)
+_pm.CreateStaticFrictionAttr(FRICTION_STATIC)
+_pm.CreateDynamicFrictionAttr(FRICTION_DYNAMIC)
+print(f"[준비] 관 상태 {'만관' if FLOODED else '배수'} — 마찰 "
+      f"{FRICTION_STATIC}/{FRICTION_DYNAMIC} "
+      f"({'물속에서 용접한다' if FLOODED else '건식 대조군'})")
 _pm.CreateRestitutionAttr(0.0)
 
 if WATER:
@@ -297,7 +402,17 @@ print(f"[준비] 결함(구멍) x={DEFECT_X * 1000:.0f}mm, 시계각 "
 FLOW_V, FLOW_BLEND = -0.10, 0.20
 W_SPACING, W_PCO, W_FLUID_REST = 0.009, 0.008, 0.0048
 W_LEVEL_Z, W_R_MAX = 0.020, 0.045
-RECYCLE_EVERY = max(1, int(round(PHYSICS_HZ / 60.0)))
+# 재투입 호출 주기 — **연산량의 주범 후보 1**.
+# recycle_particles() 는 매번 입자 위치·속도를 GPU 에서 읽어 파이썬으로 계산한
+# 뒤 다시 써 넣는다. 그 왕복이 파이프라인을 세우므로 **입자 수보다 호출 횟수가
+# 비싸다.** 기본을 초당 60회에서 15회로 낮췄다.
+#   물살은 FLOW_BLEND 0.2 로 서서히 끌어당기므로 목표 속도는 그대로 도달하고
+#   (시정수 약 0.33초), 관 밖으로 나간 입자의 재투입이 최대 67ms 늦을 뿐이다
+#   (그 사이 이동 6.7mm). 눈에 띄는 차이는 없다.
+# 되돌리려면 RECYCLE_HZ=60 으로 실행할 것.
+RECYCLE_HZ = float(os.environ.get("RECYCLE_HZ", 15))
+RECYCLE_EVERY = max(1, int(round(PHYSICS_HZ / RECYCLE_HZ)))
+ISO_PASSES = int(os.environ.get("ISO_PASSES", 2))
 INJECT_Y = (0.300, 0.340)   # 재투입은 결승선보다 상류 — 물살이 로봇을 때리지 않게
 water_instancer = None
 n_particles = 0
@@ -311,10 +426,16 @@ if WATER:
         rest_offset=0.0025, max_velocity=5.0,
         wind=Gf.Vec3f(0.0, 0.0, 0.0))     # 굽은 경로는 전역 wind 못 쓴다
     particleUtils.add_physx_particle_isosurface(
-        stage, _psys, enabled=True, grid_spacing=W_FLUID_REST * 1.5,
+        stage, _psys, enabled=ISO_PASSES > 0, grid_spacing=W_FLUID_REST * 1.5,
         surface_distance=W_FLUID_REST * 1.6,
         grid_smoothing_radius=W_FLUID_REST * 2.0,
-        num_mesh_smoothing_passes=8, num_mesh_normal_smoothing_passes=8)
+        # **연산량의 주범 후보 2** — isosurface 는 매 프레임 입자에서 표면
+        # 메시를 뽑고 이 횟수만큼 다듬는다. 8+8 은 매끈하지만 비싸다.
+        # 2+2 로도 물처럼 보인다(입자가 구슬로 보이는 것은 isosurface 를
+        # **끌** 때고, 이건 켜 둔 채 다듬기만 줄이는 것이다).
+        # 되돌리려면 ISO_PASSES=8 로 실행할 것. 0 이면 isosurface 자체를 끈다.
+        num_mesh_smoothing_passes=ISO_PASSES,
+        num_mesh_normal_smoothing_passes=ISO_PASSES)
     _wv = UsdShade.Material.Define(stage, "/World/WaterVisual")
     _ws = UsdShade.Shader.Define(stage, "/World/WaterVisual/Shader")
     _ws.CreateIdAttr("UsdPreviewSurface")
@@ -357,6 +478,9 @@ if WATER:
     UsdGeom.Imageable(_inst).MakeInvisible()   # isosurface 가 대신 렌더
     print(f"[준비] 물 입자 {n_particles:,}개 — 유속 {abs(FLOW_V):.2f} m/s "
           f"(출구→입구, 로봇 진행 반대), 수위 z+{W_LEVEL_Z * 1000:.0f}mm")
+    print(f"[준비] 연산량 손잡이  RECYCLE_HZ={RECYCLE_HZ:.0f} "
+          f"({RECYCLE_EVERY} 스텝마다)  ISO_PASSES={ISO_PASSES}"
+          f"{' (isosurface 꺼짐)' if ISO_PASSES == 0 else ''}")
 
 # ── 로봇 ────────────────────────────────────────────────────────────
 robot_prim = stage.DefinePrim(ROBOT, "Xform")
@@ -398,8 +522,8 @@ def torch_link(name, local, stl, mass, color):
     if TORCH_NOCOLLIDE:
         ca.CreateCollisionEnabledAttr(False)
     px = PhysxSchema.PhysxCollisionAPI.Apply(mp)
-    px.CreateContactOffsetAttr(0.0005)
-    px.CreateRestOffsetAttr(0.0)
+    px.CreateContactOffsetAttr(CONTACT_OFFSET)
+    px.CreateRestOffsetAttr(REST_OFFSET)
     return p
 
 
@@ -562,6 +686,78 @@ print("=" * 78)
 print(f"조립  DOF {len(dof)} = 휠 {len(wheel_idx)} / 피스톤 {len(piston_idx)}"
       f" / 벨로우즈 {len(bel_idx)} / 토치 J1,J2   물리 1/{PHYSICS_HZ:.0f}")
 
+# 질량 — 토치 포함이 기준이다(방침상 항상 붙어 있다)
+_m_links = [q for q in stage.Traverse()
+            if str(q.GetPath()).startswith(ROBOT + "/")
+            and q.HasAPI(UsdPhysics.RigidBodyAPI)]
+_m_total = 0.0
+for q in _m_links:
+    _ma = UsdPhysics.MassAPI(q).GetMassAttr()
+    if _ma:
+        _m_total += float(_ma.Get() or 0.0)
+print(f"질량  {_m_total * 1000:.0f} g (링크 {len(_m_links)}개"
+      + ("" if NO_TORCH else f", 토치 {torch_spec.MASS_TORCH_KG * 1000:.0f}g 포함")
+      + f")  중량 {_m_total * 9.81:.2f} N"
+      + ("   ⚠ --no-torch 대조군" if NO_TORCH else ""))
+
+# ── 유체력 준비 (--fluid) ───────────────────────────────────────────
+_fluid_view = None
+if FLUID:
+    from isaacsim.core.prims import RigidPrim               # noqa: E402
+    # 힘은 **본체 링크**에 넣는다. 항력 작용점(본체 중심)과 접지점의 높이 차가
+    # 피칭 모멘트를 만드는 것도 자연히 재현된다(설계 §4.4 4번 항목).
+    _fluid_view = RigidPrim([f"{ROBOT}/seg0_body", f"{ROBOT}/seg1_body"],
+                            name="fluid_body")
+    _fluid_view.initialize()
+
+    _links = [str(q.GetPath()) for q in stage.Traverse()
+              if str(q.GetPath()).startswith(ROBOT + "/")
+              and q.HasAPI(UsdPhysics.RigidBodyAPI)]
+    _mass_view = RigidPrim(_links, name="fluid_mass")
+    _mass_view.initialize()
+    M_TOTAL = float(np.sum(_mass_view.get_masses()))
+
+    # 부력은 배수 체적에서 바로 나온다(설계 V_disp). 로봇 질량과 무관하다.
+    F_BUOY = RHO * G * V_DISP
+    F_DRAG_DESIGN = 0.5 * RHO * CD_EFF * A_FRONTAL * V_FLOW_DESIGN ** 2
+    # 견인 한계 = 피스톤 6개가 각각 9N 으로 벽을 누르므로 수직항력 54N.
+    F_TRACTION = 6 * 9.0 * FRICTION_STATIC
+    print(f"[준비] 만관 유체력 (해석적, 입자 없음) — 설계 v3 §12.3 확정값")
+    print(f"       질량 {M_TOTAL * 1000:.0f}g  중량 {M_TOTAL * G:.2f}N  "
+          f"부력 {F_BUOY:.2f}N (배수 {V_DISP * 1e6:.0f}cm³)")
+    print(f"       정면적 {A_FRONTAL * 1e6:.0f}mm²  C_d,eff {CD_EFF:.2f}  "
+          f"유속 {V_FLOW_DESIGN}m/s")
+    _verdict = (f"버틴다 (여유 {F_TRACTION / F_DRAG_DESIGN:.1f}배)"
+                if F_DRAG_DESIGN < F_TRACTION else "⚠ 떠밀린다")
+    print(f"       항력 {F_DRAG_DESIGN:.2f}N  vs 견인 {F_TRACTION:.2f}N  "
+          f"→ {_verdict}")
+    if F_BUOY > M_TOTAL * G:
+        print(f"       ⚠ 부력이 중량을 넘는다 — 로봇이 뜬다")
+
+
+def apply_fluid():
+    """항력(관 축 방향) + 부력(연직 위)을 매 스텝 넣는다.
+
+    🚨 apply_forces 는 **1 스텝만 유효하다** — 매 스텝 다시 걸어야 한다.
+    항력 방향은 로봇이 어디 있든 **코스 접선**을 따라야 한다(곡관에서 X 고정이면
+    엉뚱한 방향으로 민다). path_dist_tangent 가 그 접선을 준다.
+    """
+    if _fluid_view is None:
+        return 0.0
+    pos = _fluid_view.get_world_poses()[0]
+    vel = _fluid_view.get_linear_velocities()
+    _, tx, ty = path_dist_tangent(pos[:, 0], pos[:, 1])
+    # 로봇 진행 방향(+접선) 성분
+    v_robot = vel[:, 0] * tx + vel[:, 1] * ty
+    rel = (-V_FLOW_DESIGN) - v_robot          # 유속은 진행 반대(역류)
+    # 정면적·부력을 두 세그먼트가 반씩 나눠 진다.
+    f = 0.5 * RHO * CD_EFF * (A_FRONTAL / 2.0) * rel * np.abs(rel)
+    forces = np.stack([f * tx, f * ty,
+                       np.full_like(f, F_BUOY / 2.0)], axis=-1)
+    _fluid_view.apply_forces(forces.astype(np.float32), is_global=True)
+    return float(np.sum(f))
+
+
 _XC = UsdGeom.XformCache()
 _seg1 = stage.GetPrimAtPath(f"{ROBOT}/seg1_body")
 _ring = stage.GetPrimAtPath(f"{ROBOT}/torch_ring") if not NO_TORCH else _seg1
@@ -638,32 +834,86 @@ if SHOTS:
             rp = cam.get_render_product_path()
             ann = rep.AnnotatorRegistry.get_annotator("rgb")
             ann.attach(rp)
-            rigs.append((nm, ann))
+            # 🔑 Depth 도 같이 받는다. **distance_to_image_plane 이 아니라
+            #    distance_to_camera** — 관 내부는 방사형이라 광축 투영 거리가
+            #    아니라 실제 광선 거리가 필요하다(설계 §카메라, 실기 확정).
+            #    결함 검출은 이쪽이 근거다. 구멍 너머는 inf 로 나온다.
+            dep = rep.AnnotatorRegistry.get_annotator("distance_to_camera")
+            dep.attach(rp)
+            rigs.append((nm, ann, dep))
         print(f"[준비] 카메라 프레임 저장 → {OUT}")
     except Exception as exc:
         print(f"[경고] 카메라 초기화 실패 — 사진 없이 진행 ({exc})")
         rigs = []
 
 
+def _save_png(img, path):
+    try:
+        from PIL import Image
+        Image.fromarray(img).save(path)
+        return path
+    except Exception:
+        path = path.with_suffix(".ppm")
+        with open(path, "wb") as f:
+            f.write(b"P6\n%d %d\n255\n" % (img.shape[1], img.shape[0]))
+            f.write(img.tobytes())
+        return path
+
+
 def snap(tag):
+    """RGB 는 png, Depth 는 **npy + png** 로 저장한다.
+
+    🚨 Depth 를 png 로만 남기면 못 쓴다. 8비트 256단계에 0.005~5.0m 를 담으면
+    한 단계가 19.5mm 인데 우리가 재려는 홈은 0.6mm 다. 게다가 정규화 과정에서
+    **inf 가 사라진다** — 구멍 너머가 inf 라는 것이 검출의 핵심 신호인데
+    max 가 inf 가 되어 전체가 0 으로 뭉개진다.
+    → 원본 float32 를 .npy 로 남기고, png 는 눈으로 보는 용도로만 따로 만든다.
+    """
     if not rigs:
         return
-    for nm, ann in rigs:
+    for nm, ann, dep in rigs:
         d = ann.get_data()
         if d is None or getattr(d, "size", 0) == 0:
             print(f"  [사진] {nm} {tag}: 프레임 없음 (headless 면 정상)")
+        else:
+            img = np.asarray(d)[:, :, :3].astype(np.uint8)
+            q = _save_png(img, OUT / f"{tag}_{nm}_rgb.png")
+            print(f"  [사진] {q.name}  평균밝기 {img.mean():.1f}/255")
+
+        z = dep.get_data()
+        if z is None or getattr(z, "size", 0) == 0:
+            print(f"  [Depth] {nm} {tag}: 프레임 없음")
             continue
-        img = np.asarray(d)[:, :, :3].astype(np.uint8)
-        p = OUT / f"{tag}_{nm}.png"
-        try:
-            from PIL import Image
-            Image.fromarray(img).save(p)
-        except Exception:
-            p = p.with_suffix(".ppm")
-            with open(p, "wb") as f:
-                f.write(b"P6\n%d %d\n255\n" % (img.shape[1], img.shape[0]))
-                f.write(img.tobytes())
-        print(f"  [사진] {p.name}  평균밝기 {img.mean():.1f}/255")
+        a = np.asarray(z, dtype=np.float32)
+        np.save(OUT / f"{tag}_{nm}_depth.npy", a)
+
+        # 통계 — 숫자가 물리적으로 말이 되는지 여기서 바로 본다
+        fin = np.isfinite(a) & (a > 0)
+        n_inf = int(np.isinf(a).sum())
+        n_nan = int(np.isnan(a).sum())
+        n_zero = int((a == 0).sum())
+        if fin.any():
+            v = a[fin]
+            note = "  ← 단위가 mm 인 듯" if v.min() > 10.0 else ""
+            print(f"  [Depth] {tag}_{nm}_depth.npy  min {v.min():.4f} "
+                  f"max {v.max():.4f} 중앙값 {np.median(v):.4f} m  "
+                  f"무효 {(a.size - fin.sum()) / a.size * 100:.1f}% "
+                  f"(inf {n_inf:,} / nan {n_nan:,} / 0 {n_zero:,}){note}")
+        else:
+            print(f"  [Depth] {tag}_{nm}: 유효 픽셀 0 — "
+                  f"inf {n_inf:,} / nan {n_nan:,} / 0 {n_zero:,}")
+
+        # 눈으로 볼 png — 유효 픽셀만으로 정규화하고 무효는 빨강으로 표시
+        g = np.zeros(a.shape, np.uint8)
+        if fin.any():
+            v = a[fin]
+            lo, hi = float(v.min()), float(v.max())
+            if hi > lo:
+                g[fin] = ((a[fin] - lo) / (hi - lo) * 255).astype(np.uint8)
+        rgb = np.dstack([g, g, g])
+        rgb[~fin] = (255, 0, 0)          # 무효(=구멍 너머) 는 빨강
+        q = _save_png(rgb, OUT / f"{tag}_{nm}_depth.png")
+        print(f"          {q.name} (회색=거리, 빨강=무효)")
 
 
 _rng = np.random.default_rng(3)
@@ -725,11 +975,28 @@ inspected = False
 repos_from = None
 log = []
 
+# 속도 계측 — 설정을 바꿔 가며 비교하려면 숫자가 있어야 한다.
+import time                                              # noqa: E402
+_t_mark, _step_mark = time.time(), 0
+_f_drag = 0.0
+
 print("-" * 78)
 for step in range(STEPS):
     world.step(render=not HEADLESS)
+    if step - _step_mark >= 5 * PHYSICS_HZ:
+        _dt = time.time() - _t_mark
+        _rate = (step - _step_mark) / max(_dt, 1e-9)
+        print(f"  [속도] 물리 {_rate:6.1f} step/s  "
+              f"(실시간 대비 {_rate / PHYSICS_HZ:4.2f}x)"
+              + ("" if not WATER else
+                 f"  입자 {n_particles:,}  RECYCLE_HZ={RECYCLE_HZ:.0f}"
+                 f"  ISO_PASSES={ISO_PASSES}")
+              + ("" if not FLUID else f"  항력 {_f_drag:+.2f}N"))
+        _t_mark, _step_mark = time.time(), step
     if WATER and step % RECYCLE_EVERY == 0:
         recycle_particles()
+    if FLUID:
+        _f_drag = apply_fluid()
     t_state += 1
     ring = wpos(_ring)
     tip = wpos(_tip)

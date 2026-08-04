@@ -113,8 +113,8 @@ PHYS_CHECKS = [
     # 물리 스텝은 World 를 만드는 쪽이 정한다. assemble.py 는 조립만 하고
     # World 를 만들지 않으므로 대상에서 뺀다.
     ("물리 스텝", "물리 스텝            : 1/240 이상 (불안정 시 1/500)",
-     ["legacy/curve_demo.py", "legacy/articulate.py", "legacy/welder_articulate.py"],
-     r"PHYSICS_DT\s*=\s*1\.0\s*/\s*([\d.]+)",
+     ["repair_demo.py", "legacy/curve_demo.py", "legacy/articulate.py"],
+     r"PHYSICS_(?:DT\s*=\s*1\.0\s*/|HZ_PRE\s*=.*?\"PHYSICS_HZ\",)\s*([\d.]+)",
      lambda v: float(v) >= 240.0, "1/240 이상",
      "1/240 은 연산량이 4배다. 근거였던 실측(전진 0.0mm → 42.9mm)이 "
      "크라운 누락·마찰 0.70·예압 소실 빌드에서 나온 값이라, 설계대로 고친 "
@@ -132,22 +132,35 @@ PHYS_CHECKS = [
      ["legacy/curve_demo.py", "legacy/assemble.py"],
      r"CONTACT_OFFSET\s*=\s*([\d.]+)",
      lambda v: abs(float(v) - 0.0005) < 1e-9, "0.0005", None),
-    ("정찰기 정지마찰", "friction_static   : 0.30",
-     ["legacy/assemble.py"],
-     r"WHEEL_FRICTION_STATIC\s*=\s*([\d.]+)",
+    # 🔑 마찰은 **로봇 종류가 아니라 관 상태**로 고른다 (2026-08-05 방침).
+    #    정찰기/수리기를 나누지 않고 한 대가 점검·수리를 다 한다. 물속에서
+    #    용접하므로 시연 내내 만관값이다. 현역 repair_demo.py 가 FLOODED 로
+    #    갈라 쓰고, legacy 는 1세대 두 로봇 구분이 남아 있어 대상에서 뺀다.
+    ("만관 정지마찰", "friction_static   : 0.30", ["repair_demo.py"],
+     r"FRICTION_STATIC\s*=\s*([\d.]+)\s+if\s+FLOODED",
      lambda v: abs(float(v) - 0.30) < 1e-9, "0.30", None),
-    ("정찰기 운동마찰", "friction_dynamic  : 0.25",
-     ["legacy/assemble.py"],
-     r"WHEEL_FRICTION_DYNAMIC\s*=\s*([\d.]+)",
+    ("만관 운동마찰", "friction_dynamic  : 0.25", ["repair_demo.py"],
+     r"FRICTION_DYNAMIC\s*=\s*([\d.]+)\s+if\s+FLOODED",
      lambda v: abs(float(v) - 0.25) < 1e-9, "0.25", None),
-    ("수리기 정지마찰", "friction_static   : 0.40",
-     ["legacy/assemble.py"],
-     r"WHEEL_FRICTION_DRAINED_STATIC\s*=\s*([\d.]+)",
+    ("배수 정지마찰", "friction_static   : 0.40", ["repair_demo.py"],
+     r"FRICTION_STATIC\s*=.*else\s+([\d.]+)",
      lambda v: abs(float(v) - 0.40) < 1e-9, "0.40", None),
-    ("수리기 운동마찰", "friction_dynamic  : 0.35",
-     ["legacy/assemble.py"],
-     r"WHEEL_FRICTION_DRAINED_DYNAMIC\s*=\s*([\d.]+)",
+    ("배수 운동마찰", "friction_dynamic  : 0.35", ["repair_demo.py"],
+     r"FRICTION_DYNAMIC\s*=.*else\s+([\d.]+)",
      lambda v: abs(float(v) - 0.35) < 1e-9, "0.35", None),
+    # 만관 유체력 (§12.3 physics_flooded) — 물속 용접이므로 시연 내내 유효하다
+    ("유속", "v_flow            : 0.855   m/s", ["repair_demo.py"],
+     r"V_FLOW_DESIGN\s*=\s*([\d.]+)",
+     lambda v: abs(float(v) - 0.855) < 1e-9, "0.855", None),
+    ("항력계수", "C_d_eff           : 2.32", ["repair_demo.py"],
+     r"CD_EFF\s*=\s*([\d.]+)",
+     lambda v: abs(float(v) - 2.32) < 1e-9, "2.32", None),
+    ("정면적", "A_frontal         : 2.7e-3  m²", ["repair_demo.py"],
+     r"A_FRONTAL\s*=\s*([\d.e-]+)",
+     lambda v: abs(float(v) - 2.7e-3) < 1e-12, "2.7e-3", None),
+    ("배수 체적", "V_disp            : 1.8e-4  m³", ["repair_demo.py"],
+     r"V_DISP\s*=\s*([\d.e-]+)",
+     lambda v: abs(float(v) - 1.8e-4) < 1e-12, "1.8e-4", None),
 ]
 
 
