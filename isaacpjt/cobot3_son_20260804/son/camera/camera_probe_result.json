@@ -1,0 +1,25 @@
+{
+  "invalid_mode": "empty_is_zero",
+  "expression": "invalid = ~np.isfinite(depth)",
+  "clipping": [
+    0.005,
+    5.0
+  ],
+  "resolution": [
+    1280,
+    720
+  ],
+  "f_px": 523.8471269767526,
+  "hfov_deg": 140.0,
+  "stats": {
+    "n": 576000,
+    "zero": 0,
+    "nan": 0,
+    "inf": 576000,
+    "at_max": 0,
+    "valid": 0,
+    "vmin": NaN,
+    "vmax": NaN
+  },
+  "near_wall_px": 0
+}
