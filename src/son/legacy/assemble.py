@@ -39,6 +39,11 @@ from pathlib import Path
 import numpy as np
 from pxr import Gf, PhysxSchema, UsdGeom, UsdPhysics, UsdShade
 
+# ── 보관본(legacy) ──────────────────────────────────────────────
+# 2026-08-04 플랫폼을 벨로우즈 12륜으로 교체하면서 son 1세대
+# (6륜·중앙관절 1개) 조립을 여기로 옮겼다. **동작이 확인된 원본이라
+# 보존한다.** 옮기면서 고친 것은 자산 경로 앵커뿐이고 물리·치수 상수는
+# 한 글자도 건드리지 않았다. 자세한 것은 legacy/README.md.
 HERE = Path(__file__).resolve().parent
 SON = HERE.parent
 META = json.loads((SON / "spec" / "parts_meta.json").read_text())
@@ -52,8 +57,16 @@ _CATEGORY = {
 }
 
 
+# 보관 이동: robot / pipe 자산은 legacy/meshes 로 함께 왔다.
+# welder / camera 는 현역이라 son 루트 아래 그대로다.
+_ARCHIVED = {"robot", "pipe"}
+
+
 def part_path(name):
-    return SON / _CATEGORY[name] / "meshes" / f"{name}.stl"
+    cat = _CATEGORY[name]
+    if cat in _ARCHIVED:
+        return HERE / "meshes" / f"{name}.stl"
+    return SON / cat / "meshes" / f"{name}.stl"
 
 
 MM = 0.001

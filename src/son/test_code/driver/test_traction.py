@@ -55,9 +55,9 @@ def from_source(path, name, cast=float):
     return cast(eval(m.group(1), {"__builtins__": {}}, {}))
 
 
-FRICTION = from_source("robot/assemble.py", "WHEEL_FRICTION_STATIC")
-PRELOAD_N = from_source("robot/assemble.py", "WHEEL_PRELOAD_N")
-TORQUE_FRACTION = from_source("robot/assemble.py", "WHEEL_TORQUE_FRACTION_DESIGN")
+FRICTION = from_source("legacy/assemble.py", "WHEEL_FRICTION_STATIC")
+PRELOAD_N = from_source("legacy/assemble.py", "WHEEL_PRELOAD_N")
+TORQUE_FRACTION = from_source("legacy/assemble.py", "WHEEL_TORQUE_FRACTION_DESIGN")
 TARGET_SPEED_MPS = 0.05
 
 
@@ -140,7 +140,7 @@ def main():
     print("\n" + "=" * 78)
     print("주행 스크립트가 예압을 지키는가 — 소스를 읽어 확인")
     print("=" * 78)
-    src = (SON / "pipe" / "curve_demo.py").read_text()
+    src = (SON / "legacy" / "curve_demo.py").read_text()
 
     checks = [
         ("set_joint_positions 뒤에 암 타깃을 다시 건다",

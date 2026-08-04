@@ -45,7 +45,7 @@ from isaacsim.core.api import World                      # noqa: E402
 from isaacsim.core.prims import SingleArticulation       # noqa: E402
 from pxr import UsdGeom, UsdPhysics                      # noqa: E402
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "robot"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 import assemble                                          # noqa: E402
 
 ROBOT = "/World/Robot"

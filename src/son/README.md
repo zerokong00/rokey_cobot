@@ -4,18 +4,38 @@
 
 ```
 son/
-├─ spec/          치수·한계값 단일 출처 (parts_meta.json)
-├─ tools/         자산 생성 도구
-├─ robot/         로봇 본체 — 형상 + 물리(articulation)
-├─ camera/        카메라 센서 — 부착·발행·진단
-├─ pipe/          배관 환경 — 형상 + 주행 시험
-├─ condition/     관 상태 판정 + 시각 오도메트리 (인지, ROS 노드)
-├─ localization/  추측 항법 — 도면 없이 지나온 길 기록 (ROS 노드)
-├─ driver/        주행 제어 — FSM + 속도 법칙 (ROS 노드)
-├─ welder/        용접 모듈 — 토치 + 시퀀스 + 3겹 검증
-├─ test_code/     오프라인 검증 (강제 입력·강제 자세)
-├─ training/      YOLO 결함 검출 학습
-└─ HANDOFF.md     Isaac Sim 담당자 인수인계
+├─ repair_demo.py    ★ 기본 실행 코드 — 주행 → 결함 접근 → 용접 → 검증
+├─ robot_bellows/    ★ 현역 로봇 (벨로우즈 12륜 usda)
+├─ pipe/             배관 환경 — 코스 usda(LR R=150) + 결함 주입 + 결함/비드 메시
+├─ spec/             치수·한계값 단일 출처 (parts_meta.json)
+├─ tools/            자산 생성 도구
+├─ robot/            state_bridge.py (ROS 발행 — ⚠ 아직 son 1세대 관절 이름)
+├─ camera/           카메라 센서 — 부착·발행·진단
+├─ condition/        관 상태 판정 + 시각 오도메트리 (인지, ROS 노드)
+├─ localization/     추측 항법 — 도면 없이 지나온 길 기록 (ROS 노드)
+├─ driver/           주행 제어 — FSM + 속도 법칙 (ROS 노드)
+├─ welder/           용접 모듈 — 토치 + 시퀀스 + 3겹 검증 + torch_spec.py
+├─ legacy/           son 1세대 플랫폼 보관본 (삭제·수정 금지)
+├─ test_code/        오프라인 검증 (강제 입력·강제 자세)
+├─ training/         YOLO 결함 검출 학습
+└─ HANDOFF.md        Isaac Sim 담당자 인수인계
+```
+
+## 🔄 2026-08-04 — 플랫폼 교체
+
+로봇을 **벨로우즈 12륜**(`robot_bellows/`)으로, 코스를 **LR 곡관 R=150**
+(`pipe/pipe_elbow_lr150.usda`)으로 바꿨다. son 1세대(6륜·중앙관절 1개)는
+`legacy/` 에 **동작 상태 그대로** 보관돼 있다.
+
+근거 — 같은 배관·같은 물리 조건(1/240)에서 벨로우즈는 곡관을 **완주**하고
+son 1세대는 **수평 2% / 수직 55%** 에서 멈췄다. son 조립은 더 완만한 LR 에서도
+못 넘었고, 정지 양상이 일관되게 "암이 신장 상한에 붙고 중앙 관절은 여유가 남는"
+**서스펜션 스트로크 부족**이었다. 자세한 것은 `legacy/README.md`.
+
+실행:
+```bash
+DISPLAY=:1 isaac_python repair_demo.py --shots   # GUI + 사진 (out/)
+isaac_python repair_demo.py --headless           # 로그로 검증
 ```
 
 ## 각 디렉터리

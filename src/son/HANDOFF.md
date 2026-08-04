@@ -1,5 +1,18 @@
 # Isaac Sim 담당자 인수인계 (2026-08-04)
 
+> ## ⚠ 이 문서는 son 1세대(6륜) 기준이다 — 갱신 필요
+>
+> 2026-08-04 저녁에 플랫폼을 **벨로우즈 12륜**(`robot_bellows/`)으로 바꿨고,
+> 코스도 **LR 곡관 R=150**(`pipe/pipe_elbow_lr150.usda`)으로 교체했다.
+> 아래 실행 순서(①~⑤)는 `legacy/` 로 옮긴 1세대 스크립트를 가리킨다.
+>
+> **지금 돌려야 할 것은 `repair_demo.py` 하나다:**
+> ```bash
+> DISPLAY=:1 isaac_python repair_demo.py --shots
+> ```
+> 주행 → 결함 접근 → J1/J2 정렬 → 용접 → 비드 확인까지 한 번에 돈다.
+> 로봇 쪽 함정은 `robot_bellows/README.md`, 1세대 이력은 `legacy/README.md`.
+
 **STL만으로는 아무것도 동작하지 않는다.** STL은 형상일 뿐이고 관절·물리·카메라·
 IMU·ROS 발행은 전부 스크립트가 실행 중에 만든다.
 

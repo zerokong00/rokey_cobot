@@ -43,7 +43,10 @@ def trans(x, y, z):
 
 
 def load(cat, name):
-    return trimesh.load(str(SON / cat / "meshes" / f"{name}.stl"))
+# 보관 이동(2026-08-04): son 1세대 로봇·코스 배관 자산은 legacy/meshes/ 로
+# 갔다. welder / camera 는 현역이라 son 루트 아래 그대로다.
+    root = SON / "legacy" if cat in ("robot", "pipe") else SON / cat
+    return trimesh.load(str(root / "meshes" / f"{name}.stl"))
 
 
 def placed(mesh, M):

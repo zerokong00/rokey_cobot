@@ -50,6 +50,11 @@ from isaacsim.core.api import World
 from isaacsim.core.prims import SingleArticulation
 from pxr import Gf, PhysxSchema, UsdGeom, UsdLux, UsdPhysics, UsdShade
 
+# ── 보관본(legacy) ──────────────────────────────────────────────
+# 2026-08-04 플랫폼을 벨로우즈 12륜으로 교체하면서 son 1세대
+# (6륜·중앙관절 1개) 조립을 여기로 옮겼다. **동작이 확인된 원본이라
+# 보존한다.** 옮기면서 고친 것은 자산 경로 앵커뿐이고 물리·치수 상수는
+# 한 글자도 건드리지 않았다. 자세한 것은 legacy/README.md.
 HERE = Path(__file__).resolve().parent
 SON = HERE.parent
 CAMERAS = "--cameras" in sys.argv
@@ -57,7 +62,7 @@ CAMERAS = "--cameras" in sys.argv
 # 로봇은 **씬에 직접 조립한다.** USD 파일로 굽고 다시 불러오는 구조에서
 # 관 안 주행이 0mm 였다(robot/assemble.py 머리말에 대조 실측 기록).
 # 파일이 없으므로 세대 불일치·낡은 USD·덮어쓰기 우회가 전부 성립하지 않는다.
-sys.path.insert(0, str(SON / "robot"))
+sys.path.insert(0, str(HERE))
 import assemble   # noqa: E402
 from pyver import hard_exit   # noqa: E402
 
@@ -71,9 +76,15 @@ _CATEGORY = {
 }
 
 
+_ARCHIVED = {"robot", "pipe"}
+
+
 def part_path(name):
     """parts/ 는 robot / camera / pipe 로 나뉘어 있다."""
-    return SON / _CATEGORY[name] / "meshes" / f"{name}.stl"
+    cat = _CATEGORY[name]
+    if cat in _ARCHIVED:
+        return HERE / "meshes" / f"{name}.stl"
+    return SON / cat / "meshes" / f"{name}.stl"
 
 MM = 0.001
 

@@ -68,7 +68,7 @@ def main():
     print("진단 씬 — 카메라 앞이 비어 있는가")
     print("=" * 78)
 
-    pipe = trimesh.load(SON / "pipe" / "meshes" / "pipe_straight.stl")
+    pipe = trimesh.load(SON / "legacy" / "meshes" / "pipe_straight.stl")  # 보관 이동
     print(f"  pipe_straight.stl  삼각형 {len(pipe.faces):,}  "
           f"X {pipe.bounds[0][0]:.0f}~{pipe.bounds[1][0]:.0f}mm")
     r = np.hypot(pipe.vertices[:, 1], pipe.vertices[:, 2])

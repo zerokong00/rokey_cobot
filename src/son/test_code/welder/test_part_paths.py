@@ -25,7 +25,17 @@ HERE = Path(__file__).resolve().parent
 SON = HERE.parents[1]
 
 # 조립(STL 참조)은 robot/assemble.py 로 옮겼다. articulate.py 는 자체검증만 한다.
-TARGETS = ["robot/assemble.py"]   # 조립·STL 참조가 전부 여기로 모였다
+TARGETS = ["legacy/assemble.py"]   # 조립·STL 참조가 전부 여기로 모였다
+
+
+# 보관 이동(2026-08-04): son 1세대 로봇·코스 배관 자산은 legacy/meshes/ 로
+# 갔다. welder / camera 는 현역이라 son 루트 아래 그대로다.
+_ARCHIVED = {"robot", "pipe"}
+
+
+def stl_path(cat, name):
+    root = SON / "legacy" if cat in _ARCHIVED else SON / cat
+    return root / "meshes" / f"{name}.stl"
 
 
 def category_table(tree):
@@ -95,7 +105,7 @@ def main():
 
         # 표에 있는데 STL 이 실제로 없는 것 — 오타나 자산 누락
         gone = sorted(n for n, c in cat.items()
-                      if not (SON / c / "meshes" / f"{n}.stl").is_file())
+                      if not stl_path(c, n).is_file())
         print(f"  STL 이 없는 항목: {gone if gone else '없음'}"
               f"  {'FAIL' if gone else 'OK'}")
         ok = ok and not gone
@@ -103,7 +113,7 @@ def main():
         # 요청된 부품의 STL 이 실제로 열리는지까지 본다
         bad = []
         for n in sorted(want & set(cat)):
-            f = SON / cat[n] / "meshes" / f"{n}.stl"
+            f = stl_path(cat[n], n)
             if not f.is_file() or f.stat().st_size < 84:
                 bad.append(n)
         print(f"  못 읽는 STL   : {bad if bad else '없음'}"
@@ -116,6 +126,7 @@ def main():
     for rel in TARGETS:
         used |= requested_parts(ast.parse((SON / rel).read_text()))
     have = {p.stem for p in SON.glob("*/meshes/*.stl")}
+    have |= {p.stem for p in (SON / "legacy" / "meshes").glob("*.stl")}
     idle = sorted(have - used)
     print(f"  articulate 가 안 쓰는 STL {len(idle)}개: {idle}")
     print("  (배관·결함 메시는 씬 쪽에서 쓰므로 정상이다)")

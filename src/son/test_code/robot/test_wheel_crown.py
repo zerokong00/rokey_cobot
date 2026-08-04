@@ -66,7 +66,7 @@ def main():
           f"{CROWN_R if CROWN_R else '없음 ← 설계에는 50mm 이 있다'}")
     ok.append(CROWN_R is not None and abs(CROWN_R - BORE_R) < 1e-6)
 
-    m = trimesh.load(SON / "robot" / "meshes" / "wheel.stl")
+    m = trimesh.load(SON / "legacy" / "meshes" / "wheel.stl")   # 보관 이동
     ys, prof = tread_profile(m)
 
     print(f"\n  STL 실측 트레드 프로파일")
