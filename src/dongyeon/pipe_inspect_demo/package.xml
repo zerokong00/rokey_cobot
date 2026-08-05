@@ -3,14 +3,19 @@
 <package format="3">
   <name>pipe_inspect_demo</name>
   <version>0.1.0</version>
-  <description>배관 점검 로봇 — Isaac Sim 카메라 토픽(/rgb /depth) 확인 및 결함 탐지 (PC B 측)</description>
+  <description>배관 점검 로봇 — Isaac Sim 압축 RGB·Depth 토픽 기반 YOLO Seg 결함 탐지·위치 추적·수리 판정 (PC B 측)</description>
   <maintainer email="loik1235@gmail.com">dongyeon</maintainer>
   <license>MIT</license>
 
   <depend>rclpy</depend>
   <depend>sensor_msgs</depend>
   <depend>std_msgs</depend>
+  <depend>nav_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>message_filters</depend>
+  <depend>ament_index_python</depend>
   <exec_depend>python3-opencv</exec_depend>
+  <exec_depend>python3-numpy</exec_depend>
 
   <test_depend>ament_copyright</test_depend>
   <test_depend>ament_flake8</test_depend>
