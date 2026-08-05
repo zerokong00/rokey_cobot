@@ -1038,6 +1038,40 @@ def tip_end_r(s):
     return radial_r(tip_end_world(), s)
 
 
+def make_spark_confine(s0, half=0.15, step=0.005):
+    """결함 주변 중심선을 샘플링해 스파크 가둠 함수를 만든다.
+
+    🔑 직선 원기둥으로 근사하면 안 된다 — 이 맵은 결함 120mm 앞에서 관이
+       꺾이는 자리도 있어서, 무한 직선으로 가두면 스패터가 곡관 벽을 뚫고
+       건물 안으로 날아간다. 중심선 점 61개(±150mm, 5mm 간격)에 대한 최근접
+       거리로 재면 굽은 구간도 그대로 따라간다.
+    샘플 범위를 벗어난 스패터는 끝점 기준 거리가 커져 저절로 되튕긴다.
+    `bore_radius` 는 레이캐스트 12발이라 **여기서 한 번만** 부른다.
+    """
+    ss = np.arange(max(0.0, s0 - half),
+                   min(PATH.total, s0 + half) + 1e-9, step)
+    pts = np.array([PATH.point_tangent(float(s))[0] for s in ss])
+    R = bore_radius(s0) * MM
+
+    def confine(p):
+        d = p[:, None, :] - pts[None, :, :]
+        j = np.argmin(np.einsum("ijk,ijk->ij", d, d), axis=1)
+        v = p - pts[j]
+        r = np.linalg.norm(v, axis=1)
+        return r, v / np.maximum(r, 1e-12)[:, None], R
+
+    return confine
+
+
+def wall_inward(p, s):
+    """점 p 에서 **관 안쪽을 향하는** 단위벡터. 스패터가 튀어 나가는 쪽이다."""
+    c, t = PATH.point_tangent(s)
+    d = np.asarray(p, dtype=float) - c
+    rad = d - t * float(np.dot(d, t))
+    n = float(np.linalg.norm(rad))
+    return (-rad / n) if n > 1e-9 else np.array([0.0, 0.0, 1.0])
+
+
 def drive(deg_s):
     art.apply_action(ArticulationAction(
         joint_velocities=np.array([math.radians(deg_s)] * len(wheel_idx)),
@@ -1143,6 +1177,17 @@ except Exception as exc:
 sys.path.insert(0, str(SON))
 from condition.detector import PipeConditionDetector      # noqa: E402
 from welder.weld import WeldSequencer                     # noqa: E402
+from welder.spark_fx import SparkFX                       # noqa: E402
+
+# ── 아크 스파크 (시각 전용) ────────────────────────────────────────
+# 🚨 헤드리스에서는 만들지 않는다 — 렌더가 없어 보이지도 않는데 계산만 들고,
+#    판정 경로(INSPECT/VERIFY 촬영)를 건드릴 이유가 없다. 물리에는 어느
+#    모드에서도 관여하지 않는다(콜라이더 없는 PointInstancer 하나).
+sparks = None if (HEADLESS or NO_TORCH) else SparkFX(
+    stage, "/World/weld_sparks", flooded=FLOODED)
+if sparks is not None:
+    print(f"[준비] 아크 스파크 — {'수중(급냉·단거리)' if FLOODED else '기중'} "
+          f"조건, 시각 전용(물리·판정 무관)")
 
 INTR = {"fx": F_PX, "fy": F_PX, "ppx": CAM_W / 2.0, "ppy": CAM_H / 2.0,
         "f_fish": F_PX}
@@ -1595,6 +1640,7 @@ import time                                              # noqa: E402
 _t_mark, _step_mark, _f_drag = time.time(), 0, 0.0
 print("-" * 78)
 REPLAY = HOLD and not HEADLESS
+_spark_cyl = None       # 스파크 가둠 캐시 (결함 s, 가둠 함수)
 step, was_playing, reported = 0, True, False
 
 
@@ -1629,6 +1675,9 @@ def restart_demo():
             d["plug_coll"].CreateCollisionEnabledAttr(False)
     if arc_light is not None:
         arc_light.GetIntensityAttr().Set(0.0)
+    if sparks is not None:
+        sparks.clear()
+    globals()['_spark_cyl'] = None
     world.reset()
     state, t_state, cur, j2_cmd = "SETTLE", 0, 0, 0.0
     globals()['j1_cmd'] = 0.0
@@ -1890,13 +1939,16 @@ while True:
         else:
             drive(0.0)
         set_torch(j1_deg=j1_cmd, j2_m=j2_cmd)
-        if arc_light is not None:
-            arc_light.GetIntensityAttr().Set(3.0e5)
+        if arc_light is not None and sparks is None:
+            arc_light.GetIntensityAttr().Set(3.0e5)   # 깜빡임은 SparkFX 담당
         if t_state == 1:
-            print(f"[ARC] 아크 {ARC_STEPS / PHYSICS_HZ:.1f}초")
+            print(f"[ARC] 아크 {ARC_STEPS / PHYSICS_HZ:.1f}초"
+                  + ("" if sparks is None else " — 스패터 발생"))
         if t_state > ARC_STEPS:
             if arc_light is not None:
                 arc_light.GetIntensityAttr().Set(0.0)
+            if sparks is not None:
+                sparks.clear()
             # 🚨 **링크 원점이 아니라 팁 끝으로 재야 한다.** 아크가 일어나는
             #    곳은 팁 끝이고, 로봇이 편심해 있어서 같은 로드 위의 두 점이
             #    관 축 기준으로 **다른 시계각**을 갖는다(실측: 원주 오차가
@@ -2087,6 +2139,26 @@ while True:
         elif t_state > 400 * PHYSICS_HZ:
             end_reason = f"복귀 시간 초과 — s {s_hint * 1000:.1f}mm 에서 멈춤"
             state, t_state = "DONE", 0
+
+    # ── 아크 스패터 (시각 전용) ────────────────────────────────────
+    # 🔑 **FSM 뒤에 둔다.** 아크 조명 깜빡임을 여기서 걸기 때문이다 — 앞에
+    #    두면 ARC 분기의 `Set(3.0e5)` 가 매 스텝 덮어써서 깜빡임이 안 보인다.
+    # 🚨 `confine` 을 반드시 준다. 안 주면 스패터가 관벽을 뚫고 건물 안으로
+    #    날아간다(기중 정지거리 0.5m 이상 vs 관 내반경 0.05m).
+    if sparks is not None:
+        if state == "ARC" and d_cur is not None:
+            _sd = d_cur["s"]
+            # 🚨 가둠 함수 만들기는 중심선 샘플링 + 레이캐스트 12발이다.
+            #    매 스텝 하면 안 된다 — 결함마다 한 번만 만들고 캐시한다.
+            if _spark_cyl is None or _spark_cyl[0] != _sd:
+                _spark_cyl = (_sd, make_spark_confine(_sd))
+            _spo = tip_end_world()
+            sparks.step(1.0 / PHYSICS_HZ, emitting=True, origin=_spo,
+                        normal=wall_inward(_spo, _sd), light=arc_light,
+                        confine=_spark_cyl[1])
+        else:
+            _spark_cyl = None
+            sparks.step(1.0 / PHYSICS_HZ, emitting=False)
 
 if not reported:
     report()

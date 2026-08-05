@@ -218,13 +218,18 @@ V_FLOW_SIGNED = -V_FLOW_DESIGN
 WHEEL_R = 0.010
 SEG_GAP = 0.076        # seg0 z=0 → seg1 z=-0.076 (seg1 이 앞)
 
-# 주행 속도. 설계 기준은 0.05 m/s 였으나 시연이 너무 느려 **3배**로 올렸다.
-# 처음에 6배(0.30)로 올렸다가 되돌렸다 — 검출과 충돌해서다:
-#   카메라 10Hz 에서 0.30 m/s 면 프레임당 30mm 전진하는데 결함이 38mm 라
-#   화면에 잡히는 것이 1.3 프레임뿐이다. 한 장 놓치면 그냥 지나간다.
-#   0.15 m/s 면 프레임당 15mm → 2.5 프레임에 걸린다.
+# 주행 속도 — **설계값 0.05 m/s.**
+# 🚨 이력: 시연이 느려 6배(0.30)로 올렸다가 3배(0.15)로 내렸고, 검출 기반
+#    주행으로 바꾼 뒤 **다시 설계값으로 되돌렸다**(2026-08-05 사용자 지시:
+#    GUI 로 직접 보고 *"속도가 너무 빨라서 감지를 못한다"*).
+#    근거는 처음부터 같다 — 이 로봇은 **카메라 10Hz 로 결함을 찾으며 간다.**
+#      0.30 m/s → 프레임당 30mm. 결함 38mm 가 1.3 프레임에만 걸린다
+#      0.15 m/s → 프레임당 15mm. 2.5 프레임
+#      0.05 m/s → 프레임당  5mm. 7.6 프레임 — 여기서야 여유가 생긴다
+#    속도를 올리면 **정지 위치도 그만큼 늦어져** 결함을 지나친 자리에서
+#    목표를 잡는다(실측: 0.15 에서 목표가 정답보다 13.7mm 앞).
 # SPEED_MPS 로 바꿀 수 있다.
-TARGET_SPEED_MPS = float(os.environ.get("SPEED_MPS", 0.15))
+TARGET_SPEED_MPS = float(os.environ.get("SPEED_MPS", 0.05))
 SPIN_DEG_S = math.degrees(TARGET_SPEED_MPS / WHEEL_R)
 
 # 🚨 속도를 올리면 **접촉 감지폭도 같이 넓혀야 한다.**
@@ -325,6 +330,37 @@ def path_dist_tangent(px, py):
     tx = np.where(which == 0, 1.0, np.where(which == 1, -np.sin(ang), 0.0))
     ty = np.where(which == 0, 0.0, np.where(which == 1, np.cos(ang), 1.0))
     return d.min(axis=0), tx, ty
+
+
+def path_point(px, py):
+    """xy 점 → 가장 가까운 **중심선 점** (cx, cy). 중심선은 z=0 평면에 있다.
+
+    `path_dist_tangent` 는 거리만 주는데, 스파크를 관에 가두려면 어느 쪽으로
+    밀어내야 하는지(방향)가 필요해서 점 자체를 돌려준다. 세 갈래(입구 직관 /
+    곡관 / 출구 직관) 판정은 위 두 함수와 같다.
+    """
+    ang = np.clip(np.arctan2(py, px), -np.pi / 2, 0.0)
+    cx = np.stack([np.clip(px, -S_IN, 0.0), ARC_R * np.cos(ang),
+                   np.full_like(px, OUT_X)])
+    cy = np.stack([np.full_like(py, IN_Y), ARC_R * np.sin(ang),
+                   np.clip(py, 0.0, S_OUT)])
+    which = np.argmin(np.hypot(px - cx, py - cy), axis=0)
+    i = np.arange(px.size) if px.ndim else 0
+    return cx[which, i], cy[which, i]
+
+
+def spark_confine(pts):
+    """스파크 가둠 — 코스 중심선까지의 거리와 바깥 방향.
+
+    🔑 직선 원기둥으로 근사하면 안 된다. 이 시연의 결함은 곡관 입구에서
+       **22mm 앞**이라 스패터가 곧바로 곡관 구간으로 넘어간다.
+    관 끝(입구 x=-343 / 출구 y=+343)에서는 중심선 점이 끝점에 고정되므로
+    거리가 커져 저절로 되튕긴다 — 관 밖으로 새지 않는다.
+    """
+    cx, cy = path_point(pts[:, 0], pts[:, 1])
+    v = np.stack([pts[:, 0] - cx, pts[:, 1] - cy, pts[:, 2]], axis=1)
+    r = np.linalg.norm(v, axis=1)
+    return r, v / np.maximum(r, 1e-12)[:, None], PIPE_IR
 
 
 def path_s(px, py):
@@ -925,12 +961,31 @@ def wpos(prim):
 TIP_END_LOCAL = Gf.Vec3d(0.00497, 0.0, 0.0)   # torch_tip.stl 의 +Z 끝 (눕힌 뒤 +X)
 
 
+def tip_end_world():
+    """토치 팁 끝의 월드 좌표(m). 아크가 실제로 일어나는 점이다."""
+    _XC.Clear()
+    w = _XC.GetLocalToWorldTransform(_tip).Transform(TIP_END_LOCAL)
+    return np.array([float(w[0]), float(w[1]), float(w[2])])
+
+
 def tip_end_r():
     """토치 팁 끝의 **관 중심선** 기준 반경(mm)."""
-    _XC.Clear()
-    m = _XC.GetLocalToWorldTransform(_tip)
-    w = m.Transform(TIP_END_LOCAL)
+    w = tip_end_world()
     return math.hypot(w[1] - IN_Y, w[2]) * 1000
+
+
+def wall_inward(p):
+    """점 p(월드, m)에서 **관 안쪽을 향하는** 단위벡터.
+
+    스패터가 튀어 나가는 쪽이다. 이 시연의 결함은 입구 직관(관 축 = X,
+    중심선 y=IN_Y, z=0)에 있으므로 반경 성분은 (y−IN_Y, z) 로 잰다.
+    `wall_uv` 와 같은 규약이다.
+    """
+    dy, dz = float(p[1]) - IN_Y, float(p[2])
+    r = math.hypot(dy, dz)
+    if r < 1e-9:
+        return np.array([0.0, 0.0, 1.0])
+    return np.array([0.0, -dy / r, -dz / r])
 
 
 def drive(deg_s):
@@ -1029,6 +1084,19 @@ if True:
 sys.path.insert(0, str(SON))
 from condition.detector import PipeConditionDetector      # noqa: E402
 from welder.weld import WeldSequencer                     # noqa: E402
+from welder.spark_fx import SparkFX                       # noqa: E402
+
+# ── 아크 스파크 (시각 전용) ────────────────────────────────────────
+# 🚨 **헤드리스에서는 만들지 않는다.** 렌더가 없어 보이지도 않는데 계산만 들고,
+#    무엇보다 판정 경로(INSPECT/VERIFY 촬영)를 건드릴 이유가 없다.
+#    물리에는 어느 모드에서도 관여하지 않는다 — 콜라이더 없는 PointInstancer 다.
+# 🔑 매질을 넘긴다. 만관(수중 용접)이면 항력 45/s · 수명 0.13s 라 스패터가
+#    몇 cm 못 가고 꺼진다. 공기 중이면 2.6/s · 0.42s 로 포물선을 그린다.
+sparks = None if (HEADLESS or NO_TORCH) else SparkFX(
+    stage, "/World/weld_sparks", flooded=FLOODED)
+if sparks is not None:
+    print(f"[준비] 아크 스파크 — {'수중(급냉·단거리)' if FLOODED else '기중'} "
+          f"조건, 시각 전용(물리·판정 무관)")
 
 # 🚨 **결함 프림의 원점은 관 축 위다.** `DEF_XF = trans(DEFECT_X, IN_Y, 0)` 이고
 #    벽면 패치는 STL 안에 +Z 로 들어 있다(위 「결함 / 비드」 절). 그래서
@@ -1307,6 +1375,70 @@ def defect_pixel():
     return px
 
 
+def hole_target(hole):
+    """검출된 구멍 화소 → **결함의 월드 위치** → (축방향 x[m], 시계각[deg]).
+
+    🔑 **이것이 "카메라로 찾아간다" 의 실체다.** 여기서 나온 값만 주행·정렬에
+       쓰고, 정답 좌표(`DEFECT_X`·`DEFECT_CLOCK_DEG`)는 **판정에만** 남긴다.
+
+    🚨 **깊이를 쓰지 않는다.** 두 가지 이유다.
+       ① 구멍 자리는 실제로 관통이라 그 화소의 깊이는 관 너머로 빠진다(inf).
+          구멍 한가운데를 깊이로 재면 결함이 아니라 그 뒤 허공을 잰다.
+       ② 기록된 대로 이 조건의 Depth 역투영은 **±5mm 흩어진다** — 반경 50mm
+          에서 5mm 면 시계각 **5.7°** 오차이고, 용접 정렬 허용치 1.5mm
+          (원주 1.7°)를 통째로 넘는다.
+    → 대신 어안 역투영으로 **광선**만 만들고 **관 내벽 원기둥과 해석적으로
+      교차**시킨다. 관 내반경은 설계값(DN100)이고 카메라 자세는 실기에서
+      서스펜션 엔코더가 준다. 깊이 잡음이 원리적으로 안 들어온다.
+    """
+    cam_prim = stage.GetPrimAtPath(FRONT_CAM)
+    if hole is None or not cam_prim.IsValid():
+        return None
+    _XC.Clear()
+    m = _XC.GetLocalToWorldTransform(cam_prim)
+    M = np.array([[m[i][j] for j in range(4)] for i in range(4)], dtype=float)
+    C = M[3, :3]
+    ux = hole["cx"] - INTR["ppx"]
+    uy = -(hole["cy"] - INTR["ppy"])    # 화소 y 는 아래로, 카메라 +Y 는 위로
+    rr = math.hypot(ux, uy)
+    th = rr / INTR["f_fish"]            # 등거리 어안 r = f·θ
+    if rr < 1e-9:
+        d_cam = np.array([0.0, 0.0, -1.0])
+    else:
+        d_cam = np.array([ux / rr * math.sin(th), uy / rr * math.sin(th),
+                          -math.cos(th)])
+    d = d_cam @ M[:3, :3]
+    d /= max(float(np.linalg.norm(d)), 1e-12)
+    # 관 내벽 원기둥(축 = X, 중심선 y=IN_Y·z=0) 과의 교차. 나가는 쪽 근이 벽면.
+    a = d[1] ** 2 + d[2] ** 2
+    b = 2.0 * ((C[1] - IN_Y) * d[1] + C[2] * d[2])
+    c = (C[1] - IN_Y) ** 2 + C[2] ** 2 - PIPE_IR ** 2
+    disc = b * b - 4.0 * a * c
+    if a < 1e-12 or disc < 0.0:
+        return None
+    t = (-b + math.sqrt(disc)) / (2.0 * a)
+    if t <= 0.0:
+        return None
+    P = C + t * d
+    return (float(P[0]), math.degrees(math.atan2(P[1] - IN_Y, P[2])),
+            float(np.linalg.norm(P - C)) * 1000.0)
+
+
+def scan_hole():
+    """주행 중 훑기 — 정답을 **전혀** 안 쓰는 구멍 검출. 설계 카메라 10Hz.
+
+    `inspect_defect` 와 달리 관상태·비드·기대화소를 안 본다. 순수하게
+    "지금 화면에 벽면 구멍이 보이는가" 만 보고 정지 시점을 정한다.
+
+    🚨 `front_frames()` 의 기본 워밍업 200프레임을 그대로 쓰면 안 된다 —
+       주행 중 10Hz 로 부르는 자리라 렌더가 200배로 든다. GUI 는 메인 루프가
+       이미 매 스텝 렌더하므로 2프레임이면 최신 영상이고, 헤드리스는 렌더가
+       아예 없으므로 파이프라인을 채울 만큼만(8) 굽는다.
+    """
+    rgb, _ = front_frames(warm=SCAN_WARM)
+    return None if rgb is None else find_wall_hole(rgb)
+
+
 def inspect_defect(tag):
     """카메라로 실제로 본다 → (관상태, 구멍검출결과).
 
@@ -1336,6 +1468,9 @@ def inspect_defect(tag):
     g = defect_geom
     hole = find_wall_hole(rgb, expect_px=px)
     bead = find_weld_bead(rgb, expect_px=px)
+    # 🔑 **정답과 대조하기 전의 원 검출**을 따로 남긴다. `matched` 는 판정용
+    #    교차확인이고, 주행·정렬 목표는 정답을 안 본 이 값에서 나와야 한다.
+    globals()["last_raw_hole"] = hole
     if hole is None:
         print(f"  [검출] {tag} 구멍 없음 — 벽면이 이어져 있다 "
               f"(예상 자리 {px[0]:.0f},{px[1]:.0f} / 카메라 {g['fwd_mm']:.0f}mm 앞)")
@@ -1482,7 +1617,12 @@ STOP_TOL = 0.003
 # ALIGN 축방향 미세 정렬 허용치(mm). 정렬 판정 임계(weld.yaml align_tol_mm 1.5)
 # 보다 넉넉히 작아야 SWAP 이 통과한다. 아크 2초 동안의 흘러감까지 감안한 값.
 ALIGN_AXIAL_TOL = 0.4
-INSPECT_BACK_MM = 120.0     # 결함 몇 mm 앞에서 세워 촬영할지
+INSPECT_BACK_MM = 120.0     # (참고용) 설계상 촬영 정지 거리
+# 🔑 주행 중 카메라 훑기 — **설계 카메라 10Hz** 그대로. 주행 0.15 m/s 를 고른
+#    근거가 원래 이것이다(0.30 m/s 면 프레임당 30mm 라 결함 38mm 를 1.3
+#    프레임에만 잡아 놓친다). 정지 시점을 이 훑기가 정한다.
+SCAN_EVERY = max(1, int(PHYSICS_HZ / 10))
+SCAN_WARM = 8 if HEADLESS else 2         # scan_hole 워밍업 프레임 (위 주석 참조)
 ARC_STEPS = int(2.0 * PHYSICS_HZ)        # 아크 2초
 COOL_STEPS = int(1.0 * PHYSICS_HZ)
 REPOS_MM = 120.0
@@ -1496,6 +1636,11 @@ inspect_fwd_mm = 0.0
 log = []
 weld_ok = None      # VERIFY 가 카메라로 정한다. None = 아직 판정 전
 pre_hole = None     # INSPECT 가 본 구멍. VERIFY 가 이것과 비교한다
+last_raw_hole = None    # 정답 대조 **전**의 원 검출 (주행·정렬 목표의 출처)
+# 🔑 카메라가 정한 결함 위치. **주행·정렬은 이 둘만 쓴다.**
+#    정답(`DEFECT_X`/`DEFECT_CLOCK_DEG`)은 판정과 오차 보고에만 남는다.
+det_x = None        # 축방향 위치 (m, 월드)
+det_clock = None    # 시계각 (deg, +Z 에서 +Y 로. DEF_XF 와 같은 규약)
 
 
 # ── Stop → Play 로 다시 돌리기 ──────────────────────────────────────
@@ -1512,14 +1657,17 @@ pre_hole = None     # INSPECT 가 본 구멍. VERIFY 가 이것과 비교한다
 #    돌려봤다. 안 되돌린다면 2회차 물은 흩어진 상태에서 시작한다.
 def restart_demo():
     global state, t_state, j2_cmd, inspected, repos_from, log, weld_ok
-    global pre_hole
+    global pre_hole, det_x, det_clock, last_raw_hole
     weld_ok, pre_hole = None, None
+    det_x, det_clock, last_raw_hole = None, None, None
     UsdGeom.Imageable(defect_mesh).MakeVisible()
     UsdGeom.Imageable(bead_mesh).MakeInvisible()
     _bead_op.Set(DEF_XF)
     UsdGeom.Imageable(_plug_prim).MakeInvisible()
     if not NO_TORCH:
         arc_light.GetIntensityAttr().Set(0.0)
+    if sparks is not None:
+        sparks.clear()
     _plug_coll.CreateCollisionEnabledAttr(False)
     world.reset()
     state, t_state, j2_cmd = "SETTLE", 0, 0.0
@@ -1656,26 +1804,50 @@ while True:
             #    순간에만 렌더를 굽는데(front_frames), 그 전에는 어노테이터가
             #    비어 있어 1_before 가 아예 저장되지 않는다(실측).
             _, pre_hole, _ = inspect_defect("수리 전")
-            inspect_fwd_mm = defect_geom.get("fwd_mm", 0.0)
             snap("1_before")
-            if pre_hole:
-                print(f"  [판정] 결함 확인 — 수리 대상 "
-                      f"(면적 {pre_hole['area_px']:,}px)")
+            # 🔑 **여기서 주행·정렬 목표가 정해진다 — 카메라로.**
+            _tg = hole_target(last_raw_hole)
+            if _tg is None:
+                # 🚨 정답으로 대신하지 않는다(CLAUDE.md: 감지 실패 시 정답
+                #    fallback 금지). 못 찾았으면 못 고치는 것이고, 그대로 보고한다.
+                print("  ⚠ 구멍을 못 찾았다 — 수리 목표를 세울 수 없다. "
+                      "정답 좌표로 대신하지 않는다(임무 규칙 7: 인지·보고가 성공)")
+                state, t_state = "RESUME", 0
             else:
-                print("  ⚠ 수리 전인데 구멍이 안 잡혔다 — 검출 조건을 의심할 것")
-            state, t_state = "APPROACH", 0
+                det_x, det_clock, inspect_fwd_mm = _tg
+                _ex = (det_x - DEFECT_X) * 1000.0
+                _ec = ((det_clock - DEFECT_CLOCK_DEG + 180.0) % 360.0) - 180.0
+                print(f"  [목표] **카메라가 정한** 결함 위치 "
+                      f"x={det_x * 1000:+.1f}mm 시계각 {det_clock:+.1f}° "
+                      f"(카메라에서 {inspect_fwd_mm:.1f}mm)")
+                print(f"         정답 대비 축 {_ex:+.2f}mm / 원주 {_ec:+.2f}° "
+                      f"= {PIPE_IR * 1000 * math.radians(abs(_ec)):.2f}mm "
+                      f"— 이 정답은 **판정에만** 쓴다")
+                print(f"  [판정] 결함 확인 — 수리 대상 "
+                      f"(면적 {pre_hole['area_px']:,}px)" if pre_hole else
+                      "  ⚠ 정답 대조에서 걸러졌다 — 검출 조건을 의심할 것")
+                state, t_state = "APPROACH", 0
 
     elif state == "APPROACH":
         drive(SPIN_DEG_S)
         set_torch(j1_deg=0.0, j2_m=0.0)
-        if not inspected and ring[0] >= DEFECT_X - INSPECT_BACK_MM * MM:
-            inspected = True
-            drive(0.0)
-            state, t_state = "INSPECT", 0
-        elif ring[0] >= DEFECT_X - STOP_TOL:
+        if not inspected:
+            # 🔑 **정답을 안 쓰는 정지 조건.** 카메라를 설계 10Hz 로 훑다가
+            #    벽면 구멍이 보이면 선다. 예전에는 `ring[0] >= DEFECT_X -
+            #    INSPECT_BACK_MM` 이었는데 그건 결함 위치를 미리 아는 것이다.
+            if t_state % SCAN_EVERY == 0 and scan_hole() is not None:
+                inspected = True
+                drive(0.0)
+                print(f"[탐지] 벽면 구멍 발견 — 링 x={ring[0] * 1000:.1f}mm "
+                      f"에서 정지. 위치는 카메라가 정한다")
+                state, t_state = "INSPECT", 0
+            elif path_s(*wpos(_seg1)[:2]) > S_IN + S_ARC + 0.25:
+                print("[END_REACHED] 코스 끝까지 결함을 못 봤다 — 보고하고 끝낸다")
+                state, t_state = "DONE", 0
+        elif ring[0] >= det_x - STOP_TOL:
             drive(0.0)
             print(f"[APPROACH] 결함 도달 — 링 x={ring[0] * 1000:.1f}mm "
-                  f"(목표 {DEFECT_X * 1000:.0f}), {t_state} 스텝")
+                  f"(카메라가 정한 목표 {det_x * 1000:+.1f}), {t_state} 스텝")
             state, t_state = "ALIGN", 0
         elif t_state % 400 == 0:
             q = np.asarray(art.get_joint_positions(), dtype=float)
@@ -1698,18 +1870,21 @@ while True:
         #    0 으로 줘도 관성으로 흘러가서 실측 오차가 1.8~2.1mm 로 남았다.
         #    설계는 거칠게 접근(`approach_tol_mm 5.0`) 한 뒤 **ALIGN 에서 미세
         #    조정**하는 구조다. 여기서 바퀴를 저속으로 되물려 축을 맞춘다.
-        ax_mm = (DEFECT_X - wpos(_tip)[0]) * 1000.0   # + 면 결함이 아직 앞
+        # 🔑 목표는 **카메라가 정한 값**(det_x·det_clock)이다. 정답 좌표는
+        #    아래 SWAP 의 판정에만 쓴다 — 제어와 판정을 같은 출처로 두면
+        #    자기충족이 된다(CLAUDE.md).
+        ax_mm = (det_x - wpos(_tip)[0]) * 1000.0      # + 면 결함이 아직 앞
         if abs(ax_mm) > ALIGN_AXIAL_TOL:
             drive(math.copysign(SPIN_DEG_S * 0.12, ax_mm))
         else:
             drive(0.0)
-        set_torch(j1_deg=DEFECT_CLOCK_DEG, j2_m=0.0)
+        set_torch(j1_deg=det_clock, j2_m=0.0)
         j1_now = math.degrees(float(art.get_joint_positions()[j1_idx]))
-        _ok = (abs(j1_now - DEFECT_CLOCK_DEG) < 1.0
-               and abs(ax_mm) <= ALIGN_AXIAL_TOL)
+        _dj1 = ((j1_now - det_clock + 180.0) % 360.0) - 180.0   # ±180 감기
+        _ok = abs(_dj1) < 1.0 and abs(ax_mm) <= ALIGN_AXIAL_TOL
         if _ok and t_state > 0.5 * PHYSICS_HZ:
-            print(f"[ALIGN] J1 = {j1_now:+.2f}° (목표 "
-                  f"{DEFECT_CLOCK_DEG:+.0f}°), 축방향 오차 {ax_mm:+.2f}mm "
+            print(f"[ALIGN] J1 = {j1_now:+.2f}° (카메라 목표 "
+                  f"{det_clock:+.1f}°), 축방향 오차 {ax_mm:+.2f}mm "
                   f"(허용 {ALIGN_AXIAL_TOL}mm) — 토치가 결함을 향한다")
             state, t_state = "EXTEND", 0
         elif t_state > 8 * PHYSICS_HZ:
@@ -1723,7 +1898,7 @@ while True:
         # err > 0 = 너무 뻗었다 → J2 를 줄인다.
         _err = tip_r - TIP_TARGET_R
         j2_cmd = min(max(j2_cmd - J2_KP * _err * MM, 0.0), J2_STROKE)
-        set_torch(j1_deg=DEFECT_CLOCK_DEG, j2_m=j2_cmd)
+        set_torch(j1_deg=det_clock, j2_m=j2_cmd)
         j2_now = float(art.get_joint_positions()[j2_idx])
         _hit_end = j2_cmd <= 1e-9 or j2_cmd >= J2_STROKE - 1e-9
         if (abs(_err) <= J2_TOL and t_state > 0.3 * PHYSICS_HZ) \
@@ -1743,12 +1918,16 @@ while True:
 
     elif state == "ARC":
         drive(0.0)
-        set_torch(j1_deg=DEFECT_CLOCK_DEG, j2_m=j2_cmd)
-        arc_light.GetIntensityAttr().Set(3.0e5)
+        set_torch(j1_deg=det_clock, j2_m=j2_cmd)
+        if sparks is None:
+            arc_light.GetIntensityAttr().Set(3.0e5)   # 깜빡임은 SparkFX 담당
         if t_state == 1:
-            print(f"[ARC] 아크 {ARC_STEPS / PHYSICS_HZ:.1f}초")
+            print(f"[ARC] 아크 {ARC_STEPS / PHYSICS_HZ:.1f}초"
+                  + ("" if sparks is None else " — 스패터 발생"))
         if t_state > ARC_STEPS:
             arc_light.GetIntensityAttr().Set(0.0)
+            if sparks is not None:
+                sparks.clear()
             # 🚨 **정렬 오차가 허용치 이내일 때만** 결함을 없앤다.
             #    무조건 없애면 용접이 빗나가도 성공이 되어 검증이 죽는다
             #    (임무 규칙 4 / 설계 7.2 / weld.yaml align_tol_mm).
@@ -1783,7 +1962,7 @@ while True:
 
     elif state == "COOL":
         drive(0.0)
-        set_torch(j1_deg=DEFECT_CLOCK_DEG, j2_m=0.0)
+        set_torch(j1_deg=det_clock, j2_m=0.0)
         if t_state > COOL_STEPS:
             j2_now = float(art.get_joint_positions()[j2_idx])
             print(f"[COOL/RETRACT] J2 = {j2_now * 1000:.2f}mm 수납")
@@ -1799,7 +1978,8 @@ while True:
         #    수리 전·후를 같은 거리에서 봐야 면적 비교가 성립한다.
         drive(-SPIN_DEG_S)
         set_torch(j1_deg=0.0, j2_m=0.0)
-        _cam_fwd = (DEFECT_X - wpos(stage.GetPrimAtPath(FRONT_CAM))[0]) * 1000.0
+        # 후진 거리도 **카메라가 정한 위치** 기준이다(정답 좌표 아님).
+        _cam_fwd = (det_x - wpos(stage.GetPrimAtPath(FRONT_CAM))[0]) * 1000.0
         _target = inspect_fwd_mm if inspect_fwd_mm > 1.0 else REPOS_MM
         if _cam_fwd >= _target or repos_from - ring[0] >= 0.30:
             drive(0.0)
@@ -1857,6 +2037,22 @@ while True:
         elif t_state % 1200 == 0:
             print(f"  점검 주행 중  진행 {_s * 1000:7.1f}mm"
                   + (f"  누수 {leak_count()}" if WATER else ""))
+
+    # ── 아크 스패터 (시각 전용) ────────────────────────────────────
+    # 🔑 **FSM 뒤에 둔다.** 아크 조명 깜빡임을 여기서 걸기 때문이다 — 앞에
+    #    두면 ARC 분기의 `Set(3.0e5)` 가 매 스텝 덮어써서 깜빡임이 안 보인다.
+    #    ARC 를 빠져나온 스텝에는 `state` 가 이미 COOL 이라 발생도 즉시 멎는다.
+    # 🚨 물리·판정과 무관하다. 콜라이더 없는 PointInstancer 이고, VERIFY 는
+    #    COOL(5초 이상) 뒤라 수명 0.42s 짜리 스패터가 화면에 남을 수 없다.
+    if sparks is not None:
+        _arc_on = state == "ARC"
+        _spo = tip_end_world() if _arc_on else None
+        sparks.step(1.0 / PHYSICS_HZ, emitting=_arc_on, origin=_spo,
+                    normal=wall_inward(_spo) if _arc_on else None,
+                    light=arc_light if _arc_on else None,
+                    # 관 안에 가둔다 — 코스 중심선을 그대로 쓰므로 곡관에서도
+                    # 정확하다(결함이 곡관 입구 22mm 앞이라 직선 근사는 못 쓴다).
+                    confine=spark_confine if _arc_on else None)
 
     # state == "DONE" 은 루프 맨 위에서 처리한다(재실행 대기 때문에 여기서
     # break 하면 안 된다). 그래서 이 자리에 DONE 분기가 없다.
