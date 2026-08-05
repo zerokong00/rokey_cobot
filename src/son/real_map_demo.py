@@ -162,7 +162,7 @@ LEAK_PORT_D = 0.0381        # 입자 설정에서 유도된 값 (PCO 8 / 입자�
 RHO, G = 1000.0, 9.81
 V_FLOW_DESIGN, A_FRONTAL, CD_EFF, V_DISP = 0.855, 2.7e-3, 2.32, 1.8e-4
 WHEEL_R, SEG_GAP = 0.010, 0.076
-TARGET_SPEED_MPS = float(os.environ.get("SPEED_MPS", 0.15))
+TARGET_SPEED_MPS = float(os.environ.get("SPEED_MPS", 0.05))   # 설계값. 카메라 10Hz 검출과 맞물린다(repair_demo 주석 참조)
 SPIN_DEG_S = math.degrees(TARGET_SPEED_MPS / WHEEL_R)
 CONTACT_OFFSET = max(0.0005, 1.2 * TARGET_SPEED_MPS / PHYSICS_HZ_PRE)
 if WATER:
