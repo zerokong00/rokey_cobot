@@ -1,6 +1,8 @@
+from glob import glob
+
 from setuptools import find_packages, setup
 
-package_name = "pipe_inspect"
+package_name = "pipe_comm"
 
 setup(
     name=package_name,
@@ -10,17 +12,19 @@ setup(
         ("share/ament_index/resource_index/packages",
          ["resource/" + package_name]),
         ("share/" + package_name, ["package.xml"]),
+        ("share/" + package_name + "/launch", glob("launch/*.launch.py")),
     ],
     install_requires=["setuptools"],
     zip_safe=True,
     maintainer="dongmin",
     maintainer_email="loik1235@gmail.com",
-    description="배관 점검 로봇 — Isaac Sim 카메라 토픽 확인/결함 탐지 (PC B 측)",
+    description="배관 점검 로봇 — Isaac Sim(PC1) ↔ ROS 2(PC2) 통신 규약과 감시·지령 노드",
     license="MIT",
-    tests_require=["pytest"],
     entry_points={
         "console_scripts": [
-            "camera_check = pipe_inspect.camera_check:main",
+            "camera_monitor = pipe_comm.camera_monitor:main",
+            "drive_monitor = pipe_comm.drive_monitor:main",
+            "mission_cli = pipe_comm.mission_cli:main",
         ],
     },
 )

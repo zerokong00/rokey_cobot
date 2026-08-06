@@ -1,16 +1,28 @@
 # 배관 점검 로봇 — Isaac Sim 작업 기록
 
 배관 내부를 주행하며 결함을 카메라로 탐지하는 로봇의 Isaac Sim 구현.
-프로젝트 배경·크리티컬 포인트(C1~C9)·실행 환경 실측(E1~E5)은 [CLAUDE.md](CLAUDE.md) 참조.
+
+🔑 **현역은 `zigzag/` 다 (2026-08-06).** 아래 「로봇 구성」부터의 기록은
+`graphic_file/` 의 3다리 9륜 로봇에 대한 것으로, 2026-08-01 에 끝난 이전
+단계다. 지금 굴리는 것은 지그재그 5m 코스 + 벨로우즈 12륜 로봇이고 그쪽
+기록은 `zigzag/README.md` 에 따로 있다.
 
 ## 폴더 구조
 
 ```
 isaacpjt/dongmin/
-├── CLAUDE.md                프로젝트 정의, 크리티컬 포인트, 환경 실측
 ├── README.md                이 파일 (작업 기록)
+├── zigzag/                  ★ 현역 — 지그재그 R100 점검·수리 시연
+│   ├── README.md                  실측·주의사항 (여기부터 읽는다)
+│   ├── TODO_WATER.md              물 채우기 + 누수 가시화 (진행 중)
+│   ├── course.py                  코스 기하 단일 출처
+│   ├── zigzag_demo.py             주 시연 (주행 + 용접)
+│   ├── water_demo.py              로봇 없이 물만
+│   ├── meshes/                    [산출물] build_defect_w56.py 가 생성
+│   └── test_code/                 코스 기하 대조 시험
 ├── M0609/                   이전 실습 사본 (참고용 패턴 코드)
-└── graphic_file/
+├── basic/                   최소 standalone 예제
+└── graphic_file/            이전 단계 (3다리 9륜) 형상·스크립트
     ├── pipe/                배관 형상 (STL 원본 + USD 변환본)
     │   ├── pipe.stl/.usd            직관 (내경 100mm 스케일로 사용)
     │   └── pipe_levelup.stl/.usd    가변관 (내경 190 → 테이퍼 → 95mm)
@@ -22,6 +34,10 @@ isaacpjt/dongmin/
 ```
 
 `[산출물]` 표시 파일은 스크립트 재실행으로 재생성 가능 — 저장소에 올릴 필요 없음.
+
+🚨 `zigzag/` 가 쓰는 배관·로봇 usda 두 개는 **저장소 루트**에 있다
+(`test_pipe_zigzag_long_R100.usda`, `robot_from_bot_welder_art_v2.usda`).
+`scene.py` 가 절대경로로 읽으므로 옮기면 깨진다.
 
 ## 로봇 구성 (2026-08-01 확정)
 
@@ -76,9 +92,13 @@ isaacpjt/dongmin/
 
 PC B 측 수신·검증 노드는 `src/dongmin/pipe_inspect/` (ROS2 패키지, 해당 README 참조).
 
-## 다음 작업 후보
+## 다음 작업 후보 (2026-08-01 시점 — 아래 둘은 `zigzag/` 에서 이미 답이 나왔다)
 
-- 곡관/분기관 형상 추가 및 주행 검증 (C1 — 직관에서 되던 것이 곡관에서 깨지는 패턴 주의)
-- 결함 표현 확대 (텍스처 기반 크랙, 누수 마커 — C3/C6)
-- PC B 쪽 결함 판정 노드 (`6_pick_place_color.py` 의 OBSERVE 패턴 재사용, CLAUDE.md 참조)
+- ~~곡관/분기관 형상 추가 및 주행 검증~~ → `zigzag/` 가 R100 굽힘 7개로 한다
+- ~~결함 표현 확대 (텍스처 기반 크랙, 누수 마커)~~ → `zigzag/` 는 관벽을
+  실제로 뚫는 방식(`defect.py`)으로 갔고, 누수는 `TODO_WATER.md` 진행 중
+- PC B 쪽 결함 판정 노드 (`6_pick_place_color.py` 의 OBSERVE 패턴 재사용)
 - 탐지 성능 정량 평가 (`detections.csv` vs `ground_truth.csv` 매칭)
+
+🚨 위 본문의 C1~C9 / E1~E5 는 `CLAUDE.md` 의 항목 번호인데 **그 파일은
+저장소에 없다.** 번호로 되짚을 수 없으니 본문 설명만 믿을 것.
