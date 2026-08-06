@@ -6,7 +6,7 @@
   --floor2 (기본)  진입 → 곡관 → 결함 2건 수리·검증 → **관 단절 감지 → 복귀**
   --floor1          진입 → 곡관 → **T자 분기 판단(오른손 법칙)**
 
-맵  ~/Downloads/restroom_pipe150_final.usd  (CATIA STEP 변환본, MAP_USD 로 교체 가능)
+맵  maps/restroom_pipe150_final.usd  (CATIA STEP 변환본, MAP_USD 로 교체 가능)
     🚨 **이 파일은 읽기 전용으로 다룬다.** Isaac 에서 Ctrl+S 하면 형상 없는
        껍데기가 원본을 덮어써 실제로 한 번 날아갔다(기록된 사고).
 
@@ -97,8 +97,12 @@ ROBOT_USDA = str(SON / "robot_bellows" / "robot_bellows.usda")
 #    (곡관2 에서 45.3mm) ② floor2 의 y=1400 가지가 ø90 이다. 둘 다
 #    `tools/fix_map.py` 가 고친다(원본은 안 건드리고 `_fixed.usd` 를 만든다).
 #    실측: 최악 내반경 44.6 → 48.8mm (기준 배관 pipe_elbow_lr150 과 동일).
-_MAP_FIXED = _P.home() / "Downloads" / "restroom_pipe150_final_fixed.usd"
-_MAP_ORIG = _P.home() / "Downloads" / "restroom_pipe150_final.usd"
+#    맵은 `src/son/maps/` 안에 둔다(2026-08-06 사용자 지시 — 레포 밖 참조 제거).
+#    ⚠ `.gitignore` 의 `*.usd` 때문에 **git 으로는 안 따라간다** — 받는 사람은
+#    STEP 을 변환해 `maps/` 에 넣고 `tools/fix_map.py` 를 직접 돌려야 한다.
+_MAPS = SON / "maps"
+_MAP_FIXED = _MAPS / "restroom_pipe150_final_fixed.usd"
+_MAP_ORIG = _MAPS / "restroom_pipe150_final.usd"
 MAP_USD = os.environ.get(
     "MAP_USD", str(_MAP_FIXED if _MAP_FIXED.is_file() else _MAP_ORIG))
 if MAP_USD == str(_MAP_ORIG):
