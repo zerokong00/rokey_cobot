@@ -48,6 +48,8 @@ from pathlib import Path
 HEADLESS = "--headless" in sys.argv
 HOLD = "--hold" in sys.argv
 GLASS = "--glass" in sys.argv
+# 🔁 코스를 **반대 방향으로** 통과시킨다 (분기 복귀 시험).
+REVERSE = "--reverse" in sys.argv
 # 기본은 **all** — 코스 3개에 로봇 3대를 동시에 굴린다.
 COURSE = "all"
 if "--course" in sys.argv:
@@ -59,7 +61,7 @@ if "--steps" in sys.argv:
 #    플래그가 **조용히 무시된다** — `--know-defect` 를 줬는데 아무 일도 안
 #    일어난 사고가 실제로 있었다. 모르는 `--` 인자는 여기서 잘라낸다.
 _KNOWN = {"--headless", "--hold", "--glass", "--course",
-          "--steps"}
+          "--steps", "--reverse"}
 _bad = [a for i, a in enumerate(sys.argv[1:], 1)
         if a.startswith("--") and a not in _KNOWN]
 if _bad:
@@ -150,6 +152,48 @@ REST_OFFSET = 0.0
 #      0.28        0.10   ✅         ❌ 190mm
 WHEEL_MAXFORCE = float(os.environ.get("WHEEL_MAXFORCE", 0.05))
 
+# 🎯 **중앙 관절 강성 1.0 N·m/도** (usda 원본 0.0698 은 너무 무르다).
+#    분기 구멍 위에서 앞 세그먼트가 관절째 11~19° 꺾여 내려앉는 것을 막는다.
+#    2.0 은 오히려 나쁘고 4.0 은 발산한다(실측).
+BELLOWS_STIFF = float(os.environ.get("BELLOWS_STIFF", 1.0))
+BELLOWS_MAXF = float(os.environ.get("BELLOWS_MAXF", 12.0))
+
+# 🔑 **다리는 반경 방향 직동 슬라이더**다. 도달 반경을 늘리는 데 기구를 바꿀
+#    필요가 없다 — 스트로크 상한만 올리면 된다.
+#      10mm → 휠 중심 40.0mm (DN100 r50 에 딱)
+#      35mm → 휠 중심 68.2mm (DN150 r75 에 필요한 65mm 확보)
+# 🚨 예압은 목표를 스트로크 밖에 두는 힘 드라이브라, 스트로크를 늘리면 목표도
+#    같이 밀어야 9N 이 유지된다(목표 = 스트로크 × 2).
+PISTON_STROKE = float(os.environ.get("PISTON_STROKE", 0.035))
+# 🚨 **다리를 벽에 닿은 자세로 시작한다.** 정지에서 9N 으로 튀어나가면 한 스텝
+#    이동이 감지폭(0.5mm)을 넘어 벽을 뚫는다. 스트로크 10mm 면 뚫어도 관 안에
+#    남지만 35mm 면 관 밖까지 나가 통째로 발산했다(실측).
+PISTON_INIT = float(os.environ.get("PISTON_INIT", 0.00675))
+# 🚨 **예압은 maxForce 로 잘린다.** 목표(Δ)를 키워도 상한이 9N 이면 힘은 9N 그대로다.
+#    설계 예압이 9N(피스톤 6개 → 수직항력 54N)이라 기본은 9. 더 밀어야 하면
+#    이 값을 같이 올려야 한다.
+PISTON_MAXF = float(os.environ.get("PISTON_MAXF", 9.0))
+
+# ── 중심 유지 — 다리 신장을 서로 같게 맞춘다 ────────────────────────
+# 🚨 9N **상수력**만으로는 어느 쪽으로 치우쳐도 힘이 같아 되돌리는 힘이 없다
+#    (실측: 관경 변화 구간에서 평균 이탈 16.9mm). 이 로봇은 실린더가 밖으로
+#    팽창하며 벽을 밀어 가는 구조라, **세 다리 신장이 같아야 중앙에 선다.**
+#    → 세그먼트마다 평균 신장 + Δ 를 모두의 목표로 준다. 덜 뻗은 다리가 더
+#      세게 밀어 몸체가 중앙으로 돌아온다. Δ×강성(3000) = 예압 9N.
+CENTER_ON = os.environ.get("CENTER", "1") == "1"
+CENTER_DELTA = float(os.environ.get("CENTER_DELTA", 0.003))
+
+# ── 속도 유지 조절기 (휠 실측 각속도 되먹임) ────────────────────────
+GOV_ON = os.environ.get("GOV", "1") == "1"
+GOV_KI = float(os.environ.get("GOV_KI", 2.0))
+GOV_MIN, GOV_MAX = 0.5, 1.5
+
+# ── 곡관 감속 — 관절 엔코더로 스스로 정한다 ─────────────────────────
+AUTO_SPEED = os.environ.get("AUTO_SPEED", "1") == "1"
+CURVE_MIN = float(os.environ.get("CURVE_MIN", 0.45))
+BEND_REF = float(os.environ.get("BEND_REF", 14.0))
+ACC_MPS2, DEC_MPS2 = 0.08, 0.40
+
 ROBOT = "/World/Robot"
 
 world = World(stage_units_in_meters=1.0,
@@ -182,6 +226,29 @@ def scale(s):
     return m
 
 
+def load_stl(path):
+    data = Path(path).read_bytes()
+    n = struct.unpack("<I", data[80:84])[0]
+    a = np.frombuffer(data[84:84 + n * 50], dtype=np.uint8).reshape(n, 50)
+    tri = a[:, 12:48].copy().view("<f4").reshape(n * 3, 3).astype(np.float64)
+    pts, inv = np.unique(np.round(tri, 5), axis=0, return_inverse=True)
+    return pts * MM, inv.reshape(n, 3)
+
+
+def make_mesh(path, stl, color=None, xform=None):
+    pts, idx = load_stl(stl)
+    mesh = UsdGeom.Mesh.Define(stage, path)
+    mesh.CreatePointsAttr([Gf.Vec3f(*p) for p in pts])
+    mesh.CreateFaceVertexCountsAttr([3] * len(idx))
+    mesh.CreateFaceVertexIndicesAttr(idx.reshape(-1).tolist())
+    mesh.CreateExtentAttr([Gf.Vec3f(*pts.min(0)), Gf.Vec3f(*pts.max(0))])
+    mesh.CreateSubdivisionSchemeAttr("none")
+    if color:
+        mesh.CreateDisplayColorAttr([Gf.Vec3f(*color)])
+    if xform is not None:
+        UsdGeom.Xformable(mesh).AddTransformOp().Set(xform)
+    return mesh
+
 # ── 코스 3종 ────────────────────────────────────────────────────────
 # CAD 실측(STEP 곡면 + 변환 USD 정점, 단위 mm):
 #   fixed_pipe  내반경 50 / 외 55, 굽힘 R150(LR).  중심선 =
@@ -199,7 +266,15 @@ def scale(s):
 #    1000배로 들어온다. 참조 Xform 에 scale 0.001 을 명시한다(real_map_demo
 #    와 같은 처리).
 _ELBOW = MAPS / "fixed_pipe.usd"
-_TEE = MAPS / "tshape_test.usd"
+# 🚨 **배관은 STEP 으로 받아 `tools/step_to_usd.py` 로 굽는다.** 직접 저작한
+#    `.usda` 판은 면·법선·중복이 다 정상인데도 PhysX 가 못 받아 로봇이 닿는
+#    즉시 발산했다(실측). 변환기로 구운 판은 다른 CAD 배관과 같은 경로라 정상.
+_RED = MAPS / "reducer_r.usd"
+# 🎯 **양방향 스위프 T** (R185, 2026-08-06 STEP 수령). 가지는 본관에 수직이지만
+#    접합부 목이 본관 **양쪽 모두**와 R185 로 블렌드된다 — 각도가 아니라
+#    곡률로 푸는 형상. 로봇 요축 한계 55° 로는 각진 90° 를 못 돌지만 R150
+#    곡관은 통과한다는 실측에서 나온 요청이다.
+_TEES = MAPS / "tee_sweep.usd"
 
 # 코스별 중심선 — **원본 좌표(mm)로** 적고, 아래에서 코스 변환을 그대로 먹인다.
 # 손으로 월드 좌표를 다시 쓰면 회전을 두 번 계산하게 되어 어긋난다.
@@ -220,10 +295,6 @@ def _elbow_centerline():
     return np.array(pts)
 
 
-def _tee_centerline():
-    return np.array([(0.0, y, 0.0) for y in np.linspace(250.0, -250.0, 101)])
-
-
 COURSES = {
     # 이름:      (USD, 코스 변환(원본 mm → 월드 m), 중심선(원본 mm), 설명)
     "elbow_v": (_ELBOW, scale(MM) * rot(90, (0, 0, 1)) * trans(0.0, 0.0, 0.0),
@@ -232,13 +303,22 @@ COURSES = {
                 scale(MM) * rot(90, (0, 0, 1)) * rot(90, (1, 0, 0))
                 * trans(0.0, 0.9, 0.0),
                 _elbow_centerline(), "수평 곡관 — 같은 관을 진행축으로 90° 굴렸다"),
-    # 🔑 **T 분기는 눕혀 둔다** (2026-08-06 사용자 지시: "얘는 수직으로 있을 일이
-    #    없어"). 원본은 가지가 +Z(위)로 서 있어서 곡관과 같은 Rx(90°) 을 먹여
-    #    **가지까지 수평면**에 눕힌다 — 본관은 +X, 가지는 −Y 로 뻗는다.
-    "tee": (_TEE,
-            scale(MM) * rot(90, (0, 0, 1)) * rot(90, (1, 0, 0))
-            * trans(0.0, -0.9, 0.0),
-            _tee_centerline(), "T 분기 — 본관 500mm 수평, 가지도 수평(−Y)"),
+    # 🔑 **관경 변화 시험편** DN100→150→100 (STEP 수령 → 변환).
+    #    관 축이 이미 +X 라 회전은 필요 없다. 다른 코스와 안 겹치게 y=+3.2.
+    # 가지 진입 경로: 본관 −X 에서 와서 R185 원호로 꺾여 +Z 로 오른다.
+    #   원호 중심 (−185, 0, 185) → 직관 끝 (−185,0,0) 에서 (0,0,185) 로 잇는다
+    "tee_s": (_TEES, scale(MM) * trans(0.0, -1.5, 0.0),
+              np.vstack([
+                  np.array([(x, 0.0, 0.0) for x in np.linspace(-400, -185, 44)]),
+                  np.array([(-185 + 185 * math.sin(a), 0.0,
+                             185 - 185 * math.cos(a))
+                            for a in np.linspace(0, math.pi / 2, 30)[1:]]),
+                  np.array([(0.0, 0.0, z) for z in np.linspace(185, 790, 61)[1:]])]),
+              "스위프 T R185 — 본관에서 가지로 90° 진입"),
+    "reducer": (_RED, scale(MM) * trans(-0.65, 3.2, 0.0),
+                np.array([(x, 0.0, 0.0)
+                          for x in np.linspace(-600.0, 1300.0, 191)]),
+                "관경 변화 DN100→150→100 — 테이퍼 반각 4.76°"),
 }
 if COURSE != "all" and COURSE not in COURSES:
     raise SystemExit(f"[중단] --course 는 all 또는 {list(COURSES)} 중 하나여야 "
@@ -336,6 +416,29 @@ for name, (usd, xform, cl_mm, desc) in COURSES.items():
             UsdShade.MaterialBindingAPI.Apply(p).Bind(
                 _gl, bindingStrength=UsdShade.Tokens.strongerThanDescendants)
         n_col += 1
+    if name == "reducer":
+        # 🚨 입구 DN100 구간이 200mm 뿐인데 로봇은 170mm 다. 안착 중 74mm 뒤로
+        #    밀리면 뒤가 관 밖으로 나가 발산한다 → **legacy 직관 600mm 를
+        #    입구에 맞대 붙인다.** 🚨 코스 루트 아래에 넣으면 안 된다(루트에
+        #    scale 0.001 이 걸려 있는데 make_mesh 는 이미 미터다) → 월드에 직접.
+        _ep = make_mesh("/World/Pipe_reducer_ext",
+                        SON / "legacy" / "meshes" / "pipe_straight.stl",
+                        color=(0.55, 0.58, 0.60),
+                        xform=trans(-0.95, 3.2, 0.0)).GetPrim()
+        UsdPhysics.CollisionAPI.Apply(_ep)
+        UsdPhysics.MeshCollisionAPI.Apply(_ep).CreateApproximationAttr("none")
+        UsdGeom.Mesh(_ep).CreateDoubleSidedAttr(True)
+        UsdShade.MaterialBindingAPI.Apply(_ep).Bind(
+            UsdShade.Material.Get(stage, "/World/PipePhysMat"),
+            bindingStrength=UsdShade.Tokens.weakerThanDescendants,
+            materialPurpose="physics")
+        if GLASS:
+            UsdShade.MaterialBindingAPI.Apply(_ep).Bind(
+                _gl, bindingStrength=UsdShade.Tokens.strongerThanDescendants)
+        print("  reducer 입구 연장 — legacy 직관 600mm (월드 x −1.25~−0.65m)")
+
+    if REVERSE and name == COURSE:
+        cl_mm = cl_mm[::-1]          # 반대 방향 통과 시험
     cl = Centerline(xf_pts(xform, cl_mm))
     paths[name] = cl
     print(f"  {name:8s} {usd.name:18s} 메시 {len(meshes)} "
@@ -356,28 +459,6 @@ print(f"[준비] 관 상태 **배수(건식)** — 마찰 {FRICTION_STATIC}/"
 #    방향을 뒤집어 빠져나온다(임무 규칙 8 "끼임 → 후진 재시도"의 연습장판).
 #    사람이 볼 때까지 계속 돈다.
 
-def load_stl(path):
-    data = Path(path).read_bytes()
-    n = struct.unpack("<I", data[80:84])[0]
-    a = np.frombuffer(data[84:84 + n * 50], dtype=np.uint8).reshape(n, 50)
-    tri = a[:, 12:48].copy().view("<f4").reshape(n * 3, 3).astype(np.float64)
-    pts, inv = np.unique(np.round(tri, 5), axis=0, return_inverse=True)
-    return pts * MM, inv.reshape(n, 3)
-
-
-def make_mesh(path, stl, color=None, xform=None):
-    pts, idx = load_stl(stl)
-    mesh = UsdGeom.Mesh.Define(stage, path)
-    mesh.CreatePointsAttr([Gf.Vec3f(*p) for p in pts])
-    mesh.CreateFaceVertexCountsAttr([3] * len(idx))
-    mesh.CreateFaceVertexIndicesAttr(idx.reshape(-1).tolist())
-    mesh.CreateExtentAttr([Gf.Vec3f(*pts.min(0)), Gf.Vec3f(*pts.max(0))])
-    mesh.CreateSubdivisionSchemeAttr("none")
-    if color:
-        mesh.CreateDisplayColorAttr([Gf.Vec3f(*color)])
-    if xform is not None:
-        UsdGeom.Xformable(mesh).AddTransformOp().Set(xform)
-    return mesh
 
 
 CM = SON / "camera" / "meshes"
@@ -397,7 +478,9 @@ CAM_SPECS = [
 # 출발점 — 입구에서 안쪽으로 120mm. 🚨 안착 중에 로봇이 뒤로 밀린다(피스톤
 # 6개가 동시에 벽을 밀며 자세를 잡는 과도 구간, 토치를 달면 74mm). 입구에
 # 너무 붙여 세우면 밀린 뒤 후방 휠이 관 밖 자유공간에 떠서 못 나간다.
-START_S = 0.120
+START_S = float(os.environ.get("START_S", 0.120))
+# 🔑 리듀서만 다르다 — 입구 DN100 이 200mm 뿐이라 **연장관 안쪽**에서 출발한다.
+START_S_RED = float(os.environ.get("START_S_RED", 0.30))
 
 RUN_NAMES = list(COURSES) if COURSE == "all" else [COURSE]
 robots = []
@@ -461,6 +544,23 @@ def build_robot(name, path_cl):
     PhysxSchema.PhysxArticulationAPI.Apply(prim) \
         .CreateEnabledSelfCollisionsAttr(False)
 
+    _jt = stage.GetPrimAtPath(f"{rp}/joints")
+    for _j in (_jt.GetChildren() if _jt.IsValid() else []):
+        if _j.GetName().startswith("bellows_"):
+            _d = UsdPhysics.DriveAPI.Get(_j, "angular")
+            if _d:
+                _d.GetStiffnessAttr().Set(BELLOWS_STIFF)
+                _d.GetMaxForceAttr().Set(BELLOWS_MAXF)
+        elif "_piston_" in _j.GetName():
+            UsdPhysics.PrismaticJoint(_j).GetUpperLimitAttr().Set(PISTON_STROKE)
+            _d = UsdPhysics.DriveAPI.Get(_j, "linear")
+            if _d:
+                _d.GetTargetPositionAttr().Set(PISTON_STROKE * 2.0)
+                _d.GetMaxForceAttr().Set(PISTON_MAXF)
+    print(f"  {name}: 관절 강성 {BELLOWS_STIFF} N·m/도, 다리 스트로크 "
+          f"{PISTON_STROKE * 1000:.0f}mm → 휠 중심 도달 "
+          f"{33.25 + PISTON_STROKE * 1000:.1f}mm")
+
     _nh = 0
     for _c in Usd.PrimRange(prim):
         if _c.GetTypeName() == "Cylinder" and _c.HasAPI(UsdPhysics.CollisionAPI):
@@ -469,19 +569,19 @@ def build_robot(name, path_cl):
     if _nh:
         print(f"  {name}: 실린더 콜라이더 {_nh}개 → convexHull 메시로 교체")
 
-    i0 = int(np.argmin(np.abs(path_cl.s - START_S)))
+    _s0 = START_S_RED if name == "reducer" else START_S
+    i0 = int(np.argmin(np.abs(path_cl.s - _s0)))
     p0 = path_cl.p[i0]
     tan = path_cl.tangent(i0)
-    if abs(tan[0]) < 0.99:
-        raise SystemExit(f"[중단] {name} 출발 접선이 +X 가 아니다 "
-                         f"{np.round(tan, 3)} — 코스 변환이 틀어졌다")
     # 배치는 각 링크 로컬 변환에 굽는다(부모 Xform·root 에 걸면 PhysX 가 발산).
-    # 🔑 **회전이 없다.** 이 로봇은 관 축이 로컬 X 이고 앞쪽이 +X 라, 진행
-    #    방향 +X 와 이미 맞는다(앞 세대는 축이 Z 라 Ry(−90) 이 필요했다).
-    place = (trans(float(p0[0]), float(p0[1]), float(p0[2]))
-             if os.environ.get("AXIS_X", "0") == "1"
-             else rot(-90, (0, 1, 0)) * trans(float(p0[0]), float(p0[1]),
-                                              float(p0[2])))
+    # 🔑 **출발 자세를 접선에서 만든다 — 수직 구간에서도 출발할 수 있다.**
+    #    Ry(−90) 이 로봇 앞(로컬 −Z)을 +X 로 보내고, 그 +X 를 접선 방향으로
+    #    돌린다. 예전에는 "+X 고정" 이라 가지(수직)에서 출발할 수 없었다.
+    _into = Gf.Matrix4d(1.0)
+    _into.SetRotate(Gf.Rotation(Gf.Vec3d(1, 0, 0),
+                                Gf.Vec3d(*[float(v) for v in tan])))
+    place = rot(-90, (0, 1, 0)) * _into \
+        * trans(float(p0[0]), float(p0[1]), float(p0[2]))
     for child in list(prim.GetChildren()):
         if not child.HasAPI(UsdPhysics.RigidBodyAPI):
             continue
@@ -583,6 +683,15 @@ for r in robots:
     world.scene.add(r["art"])
 world.reset()
 
+for r in robots:          # 다리를 벽에 닿은 자세로 놓는다 (첫 스텝 전)
+    _dof = list(r["art"].dof_names or [])
+    _pi = [k for k, n in enumerate(_dof) if "_piston_" in n]
+    if _pi and PISTON_INIT > 0:
+        _q = np.array(r["art"].get_joint_positions())
+        _q[_pi] = PISTON_INIT
+        r["art"].set_joint_positions(_q)
+print(f"[준비] 다리 초기 신장 {PISTON_INIT * 1000:.2f}mm — 벽에 닿은 자세로 시작")
+
 for r in robots:
     dof = list(r["art"].dof_names or [])
     # 🚨 **DOF 는 이름으로 고를 수 없다** — 구동(회전)과 서스펜션(직동)이 같은
@@ -604,6 +713,11 @@ for r in robots:
     if len(r["wheel"]) != 12:
         print(f"[경고] {r['name']} 휠 DOF {len(r['wheel'])}개 "
               f"(12 이어야 한다). DOF 이름: {dof}")
+    _fb = stage.GetPrimAtPath(f"{r['path']}/FrontBody")
+    r["piston"] = {(sg, i): dof.index(f"seg{sg}_piston_{i}")
+                   for sg in (0, 1) for i in range(3)
+                   if f"seg{sg}_piston_{i}" in dof}
+    r["bel"] = [k for k, n in enumerate(dof) if n.startswith("bellows_")]
     _fb = stage.GetPrimAtPath(f"{r['path']}/FrontBody")
     r["seg1"] = _fb if _fb.IsValid() else stage.GetPrimAtPath(
         f"{r['path']}/seg1_body")
@@ -658,10 +772,95 @@ def wpos(prim):
     return np.array([float(t[0]), float(t[1]), float(t[2])])
 
 
+def _set_pos(r, values, indices):
+    """관절 위치 목표를 **바로** 쓴다.
+
+    🚨 `apply_action` 을 한 스텝에 여러 번 부르면 **마지막 것만 남는다** —
+       다리·휠을 각각 부르면 휠만 먹고 나머지는 조용히 사라진다(실측).
+    """
+    a = r["art"]
+    v = np.array(values, dtype=np.float32)
+    i = np.array(indices)
+    try:
+        a._articulation_view.set_joint_position_targets(v.reshape(1, -1),
+                                                        joint_indices=i)
+    except Exception:
+        a.apply_action(ArticulationAction(joint_positions=v, joint_indices=i))
+
+
+def center_legs(r):
+    """세그먼트별로 다리 신장을 평균에 맞춘다 = 몸체를 관 중앙으로."""
+    if not r.get("piston"):
+        return
+    q = np.asarray(r["art"].get_joint_positions())
+    idx, val = [], []
+    for sg in (0, 1):
+        ks = [k for (s2, _i), k in r["piston"].items() if s2 == sg]
+        if not ks:
+            continue
+        idx += ks
+        val += [float(np.mean(q[ks])) + CENTER_DELTA] * len(ks)
+    _set_pos(r, val, idx)
+    r["leg_spread"] = float(np.ptp(q[list(r["piston"].values())]))
+
+
+def curve_speed(r):
+    """관절 엔코더 → 목표 속도(m/s). **카메라를 쓰지 않는다.**
+
+    중앙 관절 4개(X·Y·X·Y)를 합성해 잰다 — 수직곡관은 피치축이, 수평곡관은
+    요축이 꺾이므로 한 축만 보면 나머지 방향을 못 알아본다.
+    """
+    if not r.get("bel"):
+        return TARGET_SPEED_MPS
+    ang = np.degrees(np.abs(
+        np.asarray(r["art"].get_joint_positions())[r["bel"]]))
+    bend = float(np.linalg.norm(ang))
+    f = 1.0 - (1.0 - CURVE_MIN) * min(bend / max(BEND_REF, 1e-6), 1.0)
+    r["bend_deg"], r["curve_f"] = bend, f
+    r["bend_max"] = max(r.get("bend_max", 0.0), bend)
+    return TARGET_SPEED_MPS * f
+
+
+def ramp(r, want):
+    """비대칭 가감속 (설계 0.08 / 0.40 m/s²)."""
+    cur = r.get("v_cmd", 0.0)
+    lim = (ACC_MPS2 if want > cur else DEC_MPS2) * PHYSICS_DT
+    cur += max(-lim, min(lim, want - cur))
+    r["v_cmd"] = cur
+    return cur
+
+
 def drive(r, deg_s):
-    r["art"].apply_action(ArticulationAction(
-        joint_velocities=np.array([math.radians(deg_s)] * len(r["wheel"])),
-        joint_indices=np.array(r["wheel"])))
+    """휠 각속도 지령 — **실측 각속도 되먹임으로 처짐을 보정한다.**
+
+    🔑 속도 드라이브의 힘은 `댐핑 × (지령 − 실제)` 라 부하가 걸리면 실제가
+       지령보다 낮은 자리에서 평형을 잡는다(열린 루프 실측 93%). 배율로 민다.
+    🚨 maxForce 에 걸리면 배율을 올려도 소용없다 → 상한 1.5.
+    🚨 정지·방향 전환에서 리셋한다(적분 폭주 방지).
+    """
+    a = r["art"]
+    if GOV_ON and abs(deg_s) > 1e-6:
+        want = math.radians(abs(deg_s))
+        meas = float(np.mean(np.abs(
+            np.asarray(a.get_joint_velocities())[r["wheel"]])))
+        if r.get("gov_dir") != (deg_s > 0):
+            r["gov"], r["gov_dir"] = 1.0, (deg_s > 0)
+        r["gov"] = float(np.clip(
+            r.get("gov", 1.0) + GOV_KI * ((want - meas) / want) * PHYSICS_DT,
+            GOV_MIN, GOV_MAX))
+        r["gov_meas"] = meas / want
+        r.setdefault("gov_hist", []).append(r["gov_meas"])
+        deg_s *= r["gov"]
+    elif GOV_ON:
+        r["gov"], r["gov_dir"] = 1.0, None
+    v = np.array([math.radians(deg_s)] * len(r["wheel"]), dtype=np.float32)
+    i = np.array(r["wheel"])
+    try:
+        a._articulation_view.set_joint_velocity_targets(v.reshape(1, -1),
+                                                        joint_indices=i)
+    except Exception:
+        a.apply_action(ArticulationAction(joint_velocities=v,
+                                          joint_indices=i))
 
 
 print("=" * 78)
@@ -725,8 +924,13 @@ while True:
             continue
 
         # ── RUN : 끝까지 갔다가 되돌아오고, 다시 간다 ──────────────
-        drive(r, SPIN_DEG_S * r["dir"])
-        r["wheel_rad"] += math.radians(SPIN_DEG_S) * PHYSICS_DT
+        if CENTER_ON:
+            center_legs(r)
+        # 🔑 **속도를 스스로 정한다** — 관절이 꺾이면 줄이고 펴지면 올린다.
+        _v = ramp(r, curve_speed(r)) if AUTO_SPEED else TARGET_SPEED_MPS
+        drive(r, math.degrees(_v / WHEEL_R) * r["dir"])
+        r["wheel_rad"] += (_v / WHEEL_R) * PHYSICS_DT
+        r["off_hist"] = r.get("off_hist", []) + [off_now]
 
         # 🚨 관 밖으로 튄 것은 되살리지 않는다 — 조용히 계속 돌면 로그가
         #    거짓말이 된다. 그 로봇만 멈추고 나머지는 계속 간다.
@@ -771,9 +975,12 @@ while True:
         for r in robots:
             p1 = wpos(r["seg1"])
             s_now, off_now, _i = r["cl"].nearest(p1)
+            _x = (f" {r.get('v_cmd', 0) * 1000:3.0f}mm/s"
+                  f"(꺾임{r.get('bend_deg', 0):.0f}°)"
+                  f" ×{r.get('gov', 1.0):.2f}")
             _line.append(f"{r['name']} s={s_now * 1000:5.0f}"
                          f"{'→' if r['dir'] > 0 else '←'}"
-                         f" 왕복{r['lap']} 끼임{r['stuck']}"
+                         f" 왕복{r['lap']} 끼임{r['stuck']}{_x}"
                          + ("(정지)" if r["dead"] else ""))
         print(f"  [{step / PHYSICS_HZ:6.1f}s] " + " | ".join(_line))
 
@@ -786,7 +993,11 @@ for r in robots:
     p1 = wpos(r["seg1"])
     s_now, off_now, _i = r["cl"].nearest(p1)
     print(f"결과  {r['name']:8s} 왕복 {r['lap']}회  끼임 {r['stuck']}회  "
-          f"s={s_now * 1000:.0f}mm  이탈 {off_now * 1000:.1f}mm"
+          f"s={s_now * 1000:.0f}mm  이탈 {off_now * 1000:.1f}mm "
+          f"(평균 {np.mean(r.get('off_hist', [0])) * 1000:.1f} / 최대 "
+          f"{np.max(r.get('off_hist', [0])) * 1000:.1f}mm)  실속도/지령 "
+          f"{np.mean(r.get('gov_hist', [1])) * 100:.1f}%  최대 꺾임 "
+          f"{r.get('bend_max', 0):.1f}°"
           + ("  ❌ 이탈로 정지" if r["dead"] else ""))
 sys.stdout.flush()
 simulation_app.close()
