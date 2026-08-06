@@ -73,7 +73,8 @@ def main(src, floor, step=60.0):
 
 
 if __name__ == "__main__":
+    # 맵은 `src/son/maps/` 안에 있다 (2026-08-06 — 레포 밖 참조 제거)
     _src = (sys.argv[1] if len(sys.argv) > 1
-            else str(_P.home() / "Downloads"
-                     / "restroom_pipe150_final_fixed.usd"))
+            else str(_P(__file__).resolve().parent.parent
+                     / "maps" / "restroom_pipe150_final_fixed.usd"))
     main(_src, sys.argv[2] if len(sys.argv) > 2 else "floor2")
