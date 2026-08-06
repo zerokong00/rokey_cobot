@@ -93,6 +93,14 @@ HOLD = "--hold" in sys.argv            # 끝나고 창을 열어 둔다
 # 기준 질량은 토치 포함 876g (본체 813 + 토치 63) 이고, 안착 후퇴량도
 # 토치 있는 74mm 가 기준이다(없으면 44mm).
 NO_TORCH = "--no-torch" in sys.argv
+# 🚨 **--known-defect : 결함 위치를 미리 알고 간다 (시연 전용).**
+#    평소 이 시연의 원칙은 "제어는 카메라, 판정은 정답" 이고, 감지 실패 시
+#    정답으로 대신하는 것은 금지돼 있다(CLAUDE.md — 실패가 드러나야 한다).
+#    이 플래그는 그 금지를 어기는 것이 아니라 **선언하고 끄는 것**이다:
+#    켜면 로그가 매 단계 "정답 사용" 이라고 찍고, 검증(VERIFY)이 무의미해진다.
+#    결함이 물에 잠겨 있어 카메라 검출이 불안정한 동안 시연을 먼저 돌리기
+#    위한 임시 모드다(2026-08-06 사용자 지시). 성능 평가에는 쓰지 말 것.
+KNOWN_DEFECT = "--known-defect" in sys.argv
 # 토치 형상·질량은 두고 **접촉만** 끈다(콜라이더를 지우면 관성이 0 이 되어 NaN).
 TORCH_NOCOLLIDE = "--torch-nocollide" in sys.argv
 # --water: 만관 조건 — 투명 배관 + 흐르는 PBD 물. 파티클은 GPU 물리 전용이라
@@ -283,6 +291,11 @@ WELD_GAP = 0.002                              # 설계 용접 간극 (v3 §2.6)
 TIP_TARGET_R = (PIPE_IR - WELD_GAP) * 1000    # 48.0 mm — 팁 끝 목표 반경
 J2_KP = 0.6                   # 팁 반경 오차(mm) → J2 보정(mm). 1.0 은 진동한다
 J2_TOL = 0.15                 # 이 안이면 도달로 본다 (mm)
+# J1 도 같은 이유로 폐루프다 (real_map 검증값 이식, 2026-08-06) — 스프링
+# 드라이브라 지령과 실제가 벌어지고, 편심 때문에 같은 J1 이어도 팁이 가리키는
+# 시계각이 다르다. 측정한 **팁 끝 시계각**으로 닫는다.
+J1_KP = 0.5                   # 시계각 오차(deg) → J1 지령 보정(deg)
+J1_TOL_DEG = 0.6              # 이 안이면 정렬로 본다 (r50 에서 0.52mm)
 
 PHYSICS_HZ = PHYSICS_HZ_PRE
 PHYSICS_DT = 1.0 / PHYSICS_HZ
@@ -480,6 +493,15 @@ if GLASS:
     _gl.CreateSurfaceOutput().ConnectToSource(_gs.ConnectableAPI(), "surface")
 for _p in stage.Traverse():
     if str(_p.GetPath()).startswith(PIPE + "/") and _p.IsA(UsdGeom.Mesh):
+        # 🚨 **배관을 양면 렌더로 켠다** (2026-08-06 실기로 원인 확정).
+        #    `pipe_elbow_lr150.usda` 에는 doubleSided 속성이 아예 없어 USD
+        #    기본값 false = **단면 메시**이고, 법선이 관 안쪽을 향한다. 그래서
+        #    RTX 가 밖에서 본 면을 전부 걸러내 **관이 통째로 투명**했다 —
+        #    안의 로봇도, 시각 물 층의 수면(922mm)도 밖에서 그대로 비쳐
+        #    "물이 관 밖에서도 보인다 / 바닥이 물이 됐다" 로 나타났다.
+        #    안쪽 면은 원래도 정면이라 **로봇 카메라·검출에는 변화가 없고**,
+        #    표시 속성이라 물리에도 영향이 없다.
+        UsdGeom.Mesh(_p).CreateDoubleSidedAttr(True)
         UsdShade.MaterialBindingAPI.Apply(_p).Bind(
             UsdShade.Material.Get(stage, "/World/PipePhysMat"),
             bindingStrength=UsdShade.Tokens.weakerThanDescendants,
@@ -511,10 +533,18 @@ print(f"[준비] 결함(구멍) x={DEFECT_X * 1000:.0f}mm, 시계각 "
 # ── 물 (--water) : yongbin_drive_test.py 검증값 그대로 ──────────────
 # 🚨 입자·물 값은 새로 만들지 않는다(사용자 지시). PCO 8 / fluid_rest 4.8 /
 #    입자-강체 contact 0.004·rest 0.0025(미지정 시 로봇이 입자 위에 부상하는
-#    함정) / 간격 9 / 수위 z+20 / 유속 0.10 / blend 0.20.
+#    함정) / 간격 9 / 유속 0.10 / blend 0.20.  **수위만 아래에서 바꾼다.**
 FLOW_V, FLOW_BLEND = -0.10, 0.20
 W_SPACING, W_PCO, W_FLUID_REST = 0.009, 0.008, 0.0048
-W_LEVEL_Z, W_R_MAX = 0.020, 0.045
+# 🔑 **수위 z+20 → z−10** (2026-08-06 사용자 지시: "물 양을 지금의 절반으로").
+#    z+20 은 관 단면적의 **74.8%**(= 사용자가 본 "3/4")를 채운다. 그 절반인
+#    37.4% 가 되는 수위가 z−10mm 다 — 원의 활꼴 (α−sinα·cosα)/π 로 역산.
+#    입자 4,987 → 1,857개(37%)라 --water 의 0.07배속도 같이 나아진다.
+#    ⚠ 바닥 개구까지 수두가 70 → 40mm 로 줄어 토리첼리 유출속도가
+#      1.17 → 0.89 m/s 가 된다. 누수는 그대로 나지만 조금 느려진다.
+#    되돌리려면 WATER_LEVEL_MM=20 으로 실행할 것.
+W_LEVEL_Z = float(os.environ.get("WATER_LEVEL_MM", -10.0)) / 1000.0
+W_R_MAX = 0.045
 # 재투입 호출 주기 — **연산량의 주범 후보 1**.
 # recycle_particles() 는 매번 입자 위치·속도를 GPU 에서 읽어 파이썬으로 계산한
 # 뒤 다시 써 넣는다. 그 왕복이 파이프라인을 세우므로 **입자 수보다 호출 횟수가
@@ -566,6 +596,10 @@ if WATER:
         _wp, bindingStrength=UsdShade.Tokens.weakerThanDescendants,
         materialPurpose="physics")
 
+    # 충수율(원의 활꼴 면적비) — 로그로 찍어 "얼마나 찼는지" 를 눈이 아니라
+    # 숫자로 확인한다. level=+r 이면 1.0(만관), 0 이면 0.5, -r 이면 0.
+    _a_fill = math.acos(max(-1.0, min(1.0, -W_LEVEL_Z / PIPE_IR)))
+    _fill_frac = (_a_fill - math.sin(_a_fill) * math.cos(_a_fill)) / math.pi
     _gx = np.arange(-S_IN + 0.01, OUT_X + 0.06, W_SPACING)
     _gy = np.arange(IN_Y - 0.05, S_OUT + 0.01, W_SPACING)
     _gz = np.arange(-W_R_MAX, W_LEVEL_Z + 1e-9, W_SPACING)
@@ -589,7 +623,9 @@ if WATER:
     water_instancer = UsdGeom.PointInstancer(_inst)
     UsdGeom.Imageable(_inst).MakeInvisible()   # isosurface 가 대신 렌더
     print(f"[준비] 물 입자 {n_particles:,}개 — 유속 {abs(FLOW_V):.2f} m/s "
-          f"(출구→입구, 로봇 진행 반대), 수위 z+{W_LEVEL_Z * 1000:.0f}mm")
+          f"(출구→입구, 로봇 진행 반대), 수위 z{W_LEVEL_Z * 1000:+.0f}mm "
+          f"— 단면적 {_fill_frac:.1%} 충수, 바닥 개구 수두 "
+          f"{(W_LEVEL_Z + PIPE_IR) * 1000:.0f}mm")
     print(f"[준비] 연산량 손잡이  RECYCLE_HZ={RECYCLE_HZ:.0f} "
           f"({RECYCLE_EVERY} 스텝마다)  ISO_PASSES={ISO_PASSES}"
           f"{' (isosurface 꺼짐)' if ISO_PASSES == 0 else ''}")
@@ -1092,13 +1128,61 @@ from welder.spark_fx import SparkFX                       # noqa: E402
 # 🚨 **헤드리스에서는 만들지 않는다.** 렌더가 없어 보이지도 않는데 계산만 들고,
 #    무엇보다 판정 경로(INSPECT/VERIFY 촬영)를 건드릴 이유가 없다.
 #    물리에는 어느 모드에서도 관여하지 않는다 — 콜라이더 없는 PointInstancer 다.
-# 🔑 매질을 넘긴다. 만관(수중 용접)이면 항력 45/s · 수명 0.13s 라 스패터가
-#    몇 cm 못 가고 꺼진다. 공기 중이면 2.6/s · 0.42s 로 포물선을 그린다.
+# 🔑 매질을 넘긴다. 만관(수중 용접)이면 항력 45/s · 수명 0.20s 라 스패터가
+#    몇 cm 못 가고 꺼진다. 공기 중이면 2.6/s · 0.50s 로 포물선을 그린다.
+# 🚨 **매질 판정은 FLOODED 가 아니라 "입자 물이 실제로 있는가"(WATER) 다**
+#    (2026-08-06 사용자 지적: "--fluid 와 --glass 의 스파크 정도가 다르다").
+#    --fluid 는 해석적 힘 두 개뿐이고 **물 프림이 하나도 없다** — 화면에 물이
+#    없는데 스패터만 수중 거동(발생률 340/s · 초속 1.1 · 비산 24mm)이라
+#    --glass(기중 700/s · 3.2 · 1.2m)와 나란히 놓으면 꺼진 것처럼 보였다.
+#    보이는 것과 거동을 일치시킨다. 물리·판정에는 어느 쪽도 영향이 없다.
+#    SPARK_WET=1 로 수중 거동을 강제할 수 있다(설계 §4.4 수중 용접 검토용).
+SPARK_WET = os.environ.get("SPARK_WET", "1" if WATER else "0") == "1"
 sparks = None if (HEADLESS or NO_TORCH) else SparkFX(
-    stage, "/World/weld_sparks", flooded=FLOODED)
+    stage, "/World/weld_sparks", flooded=SPARK_WET)
 if sparks is not None:
-    print(f"[준비] 아크 스파크 — {'수중(급냉·단거리)' if FLOODED else '기중'} "
-          f"조건, 시각 전용(물리·판정 무관)")
+    print(f"[준비] 아크 스파크 — {'수중(급냉·단거리)' if SPARK_WET else '기중'} "
+          f"조건, 시각 전용(물리·판정 무관)"
+          + ("" if SPARK_WET == FLOODED else
+             "   ※ 관은 만관이지만 보이는 물이 없어 기중 거동으로 그린다 "
+             "(SPARK_WET=1 로 되돌림)"))
+
+# ── 시각 물 층 (--fluid, 2026-08-06 사용자 요청) ─────────────────────
+# 🔑 **유체압을 거는 이상 물은 있는 것이다 — 파티클이 없을 뿐이다**(사용자).
+#    --fluid 는 항력·부력만 계산하고 물 프림이 0개라 화면에 아무것도 없었다.
+#    수체·흐름 줄무늬·누수 물줄기를 **렌더 전용**으로 그린다. 콜라이더도
+#    강체도 없어 물리·판정에 영향 0 이고, 유체력은 apply_fluid() 그대로다.
+# 🔑 재질은 갈아끼울 수 있다 — WATER_MDL 로 Material 프림 경로를 주면
+#    (vMaterials LIQUIDS 등) 그것을 쓰고, 없으면 로컬 반투명으로 간다.
+#    ⚠ 이 PC 에 vMaterials 는 없다(*.mdl 0개, 실측). 원격에서 받아 스테이지에
+#      올린 뒤 그 경로를 주는 방식이다.
+# 🔑 **시연은 `--fluid` 로 한다** (2026-08-06 사용자 확정). 관은 일반관(불투명)
+#    이고 시점을 관 안으로 넣어 본다. 그래서 물은 **수면 한 장**으로 그린다 —
+#    속이 찬 수체로 만들면 로봇이 물에 잠겨 잘려 보이고, 관 안으로 들어간
+#    카메라가 덩어리에 갇혀 화면이 통째로 파래진다(둘 다 실기 확인).
+#    WATER_FX=0 으로 물 층만 끌 수 있다 — 화면에 이상한 것이 보일 때
+#    "그게 물 층인가 아닌가" 를 한 번에 가르는 스위치다(단일 변수 대조).
+waterfx = None
+if FLUID and not HEADLESS and os.environ.get("WATER_FX") != "0":
+    from pipe import water_fx                               # noqa: E402
+    _wf_pts, _wf_tans = water_fx.elbow_centerline(
+        S_IN, IN_Y, ARC_R, OUT_X, S_OUT)
+    _v_out = water_fx.torricelli(W_LEVEL_Z, -PIPE_IR, G)
+    waterfx = water_fx.WaterFX(
+        stage, _wf_pts, _wf_tans,
+        level=W_LEVEL_Z, radius=PIPE_IR - 0.002,   # 관벽 2mm 안쪽(z-파이팅 방지)
+        flow_v=-V_FLOW_DESIGN,                     # 출구→입구 (역류 주행)
+        hole_xyz=(DEFECT_X, IN_Y, -PIPE_IR), v_out=_v_out,
+        material_path=os.environ.get("WATER_MDL"))
+    _wf_fill = (lambda a: (a - math.sin(a) * math.cos(a)) / math.pi)(
+        math.acos(max(-1.0, min(1.0, -W_LEVEL_Z / PIPE_IR))))
+    print(f"[준비] 시각 물 층 — 중심선 {waterfx.total * 1000:.0f}mm, "
+          f"수위 z{W_LEVEL_Z * 1000:+.0f}mm (단면적 {_wf_fill:.1%} 충수), "
+          f"흐름 {V_FLOW_DESIGN} m/s, 낙수 {_v_out:.2f} m/s")
+    _wf_mat = (waterfx.material_used or
+               f"로컬 반투명 (opacity {water_fx.WATER_OPACITY})")
+    print(f"       재질 {_wf_mat} — 수면 {waterfx.n_body_faces:,}면, "
+          f"렌더 전용(콜라이더·강체 없음). 물리·유체력에는 영향 0")
 
 # 🚨 **결함 프림의 원점은 관 축 위다.** `DEF_XF = trans(DEFECT_X, IN_Y, 0)` 이고
 #    벽면 패치는 STL 안에 +Z 로 들어 있다(위 「결함 / 비드」 절). 그래서
@@ -1231,6 +1315,8 @@ def wall_uv(p):
 #    5~90분위 사이 0.08~0.20 어디를 잡아도 같은 덩어리가 나왔다 → 0.12 채택.
 HOLE_DARK_FRAC = 0.12
 HOLE_MIN_PX = max(60, 300 * CAM_AREA_SCALE)   # 해상도 따라 같이 줄인다
+# 이 비율을 넘는 어두운 덩어리는 벽면 구멍이 아니라 **관 저 끝**으로 본다.
+HOLE_MAX_FRAC = float(os.environ.get("HOLE_MAX_FRAC", 0.10))
 # 비드 색 검출 — 관 벽(회색)·관 저 끝(검정)은 채도 0 이라 안 걸린다.
 BEAD_SAT_MIN = 60      # HSV 채도 하한 (0~255)
 BEAD_VAL_MIN = 40      # 너무 어두우면 색이 무의미
@@ -1248,6 +1334,12 @@ def find_wall_hole(rgb, expect_px=None):
     → ① 중앙 원판에 걸치는 라벨은 **격자로 훑어** 전부 제외
       ② 화면의 25% 를 넘는 덩어리는 벽면 구멍일 수 없으므로 제외
     """
+    # 🚨 **파란 화소를 물로 보고 빼면 안 된다** (2026-08-06 실기로 확인).
+    #    결함은 관 **바닥(180°)** 이고 수위는 그 위다 — 즉 **결함이 물에 잠겨
+    #    있어** 카메라는 수면 너머로 본다. 그래서 결함 화소도 파랗게 물들고,
+    #    "파란 건 물" 로 지우면 **찾아야 할 결함이 같이 지워진다.** 실측:
+    #    로봇이 결함을 61mm 지나칠 때까지 못 보고 `결함이 화각 밖` 으로 끝났다.
+    #    물을 지우려던 필터가 결함을 지운 것이다. → 회색조 판정 그대로 간다.
     g = cv2.cvtColor(np.asarray(rgb)[:, :, :3].astype(np.uint8),
                      cv2.COLOR_RGB2GRAY)
     g = cv2.medianBlur(g, 5)
@@ -1265,7 +1357,15 @@ def find_wall_hole(rgb, expect_px=None):
         for xx in xs:
             if lab[yy, xx]:
                 bore.add(int(lab[yy, xx]))
-    big = 0.25 * h * w
+    # 🚨 **중앙 제외만으로는 관 저 끝을 못 거른다** (2026-08-06, 저장된 프레임
+    #    으로 확인). 로봇이 곡관에 가까워지면 관 저 끝이 화면 **왼쪽으로 밀려**
+    #    중앙 원판 검사를 비껴간다. 그러면 저 끝이 통째로 "구멍" 으로 잡힌다 —
+    #    실측 48,827px(화면의 **21.2%**)이 상한 25% 를 통과해 목표가 66mm
+    #    틀어졌다. 결함은 촬영 거리에서 4,264px(**1.9%**)라 크기로 확실히
+    #    갈린다. 상한을 10% 로 조인다.
+    #    ⚠ 상한을 더 낮추면 가까이서 크게 보이는 결함까지 걸러진다 —
+    #      APPROACH 재측정이 결함을 계속 봐야 하므로 여유를 남긴 값이다.
+    big = HOLE_MAX_FRAC * h * w
 
     best = None
     for i in range(1, n):
@@ -1336,9 +1436,32 @@ def front_frames(warm=200):
         #    화소 단위로 똑같은 영상을 봤고(구멍 면적 21,002px → 21,002px),
         #    그 바람에 메꿈을 4가지로 바꿔도 판정이 하나도 안 변했다.
         #    → 조건 없이 **먼저 렌더를 굽고 나서** 읽는다.
-        for _ in range(warm):
-            world.step(render=True)
-        c, z = ann.get_data(), dep.get_data()
+        # 🔑 **판정 프레임에서는 시각 물 층을 뺀다** (2026-08-06 실측).
+        #    결함은 관 바닥이고 수위는 그 위라 결함이 물에 잠겨 있다 —
+        #    수면 너머로 보면 구멍이 덜 어둡게 잡혀 검출 거리가 무너진다
+        #    (정지 지점 결함 81mm 앞 → 33mm 앞, 그 거리에선 관벽이 원리적으로
+        #    시야 밖이라 "벽면이 이어져 있다" 가 나온다). 색으로 물만 골라낼
+        #    수는 없다 — 잠긴 결함도 같이 파랗기 때문이다(실기로 확인).
+        #    사람이 보는 화면에는 그대로 두고, **카메라가 굽는 프레임에서만**
+        #    감춘다. 여기가 렌더를 직접 굽는 유일한 지점이라 이것으로 충분하다.
+        # 🚨 **읽기까지 감춘 채로 끝내야 한다.** 렌더만 감추고 `get_data()` 를
+        #    다시 보이게 한 뒤에 부르면, 그 사이 뷰포트가 한 번 더 그리면서
+        #    **물이 든 프레임**을 어노테이터에 얹는다. 실측으로 걸렸다 —
+        #    같은 자리에서 밝기임계가 50(물 없음) 대 **27**(감췄다고 믿은
+        #    쪽)로 반토막 났고, 검출이 화면의 22%(51,708px)짜리 어두운
+        #    덩어리를 물었다. 읽기를 try 안으로 넣는다.
+        #    --known-defect 시연에서는 검출을 안 쓰므로 감출 이유가 없다 →
+        #    물이 깜빡이지 않는다.
+        _wfx = None if KNOWN_DEFECT else globals().get("waterfx")
+        if _wfx is not None:
+            _wfx.set_visible(False)
+        try:
+            for _ in range(warm):
+                world.step(render=True)
+            c, z = ann.get_data(), dep.get_data()
+        finally:
+            if _wfx is not None:
+                _wfx.set_visible(True)
         rgb = (np.asarray(c)[:, :, :3].astype(np.uint8)
                if c is not None and getattr(c, "size", 0) else None)
         depth = (np.asarray(z, dtype=np.float32)
@@ -1619,18 +1742,40 @@ STOP_TOL = 0.003
 # ALIGN 축방향 미세 정렬 허용치(mm). 정렬 판정 임계(weld.yaml align_tol_mm 1.5)
 # 보다 넉넉히 작아야 SWAP 이 통과한다. 아크 2초 동안의 흘러감까지 감안한 값.
 ALIGN_AXIAL_TOL = 0.4
+# ── ALIGN 미세 되물림 + 정지마찰 돌파 램프 (2026-08-06 실측 근거) ──────
+# 설계 12%(ALIGN_DRIVE_FRAC)로 시작한다. 그 값으로 **실제로 움직이면 그대로**
+# 두고, 0.125초 동안 팁이 ALIGN_MOVE_EPS 도 안 움직이면 배율을 한 단 올린다.
+# 근거 — 건식 실측에서 12% 지령에 바퀴는 13~15deg/s 로 도는데 로봇은 1μm 도
+# 안 나갔다(1,920스텝 = 8초 타임아웃 전체). 0.6 으로 올리면 즉시 수렴한다.
+# 조건마다 필요한 값이 다르다(만관 μ0.30 은 12% 로도 가고, 건식 μ0.40·
+# --fluid 항력 2.3N 은 못 간다) → 고정값이 아니라 **필요한 만큼만** 올린다.
+ALIGN_DRIVE_FRAC = float(os.environ.get("ALIGN_DRIVE_FRAC", 0.12))  # 시작 배율
+ALIGN_DRIVE_MAX = float(os.environ.get("ALIGN_DRIVE_MAX", 0.8))     # 상한
+ALIGN_RAMP_STEP = 0.06        # 한 번에 올리는 양
+ALIGN_RAMP_EVERY = 30         # 판정 주기(스텝) = 0.125초 @240Hz
+ALIGN_MOVE_EPS = 0.02         # 이 주기에 이만큼(mm) 못 가면 "정체" 로 본다
 INSPECT_BACK_MM = 120.0     # (참고용) 설계상 촬영 정지 거리
 # 🔑 주행 중 카메라 훑기 — **설계 카메라 10Hz** 그대로. 주행 0.15 m/s 를 고른
 #    근거가 원래 이것이다(0.30 m/s 면 프레임당 30mm 라 결함 38mm 를 1.3
 #    프레임에만 잡아 놓친다). 정지 시점을 이 훑기가 정한다.
 SCAN_EVERY = max(1, int(PHYSICS_HZ / 10))
 SCAN_WARM = 8 if HEADLESS else 2         # scan_hole 워밍업 프레임 (위 주석 참조)
+# 🚨 시각 물 층이 켜져 있으면 **스캔도 워밍업을 늘려야 한다.** front_frames 가
+#    물을 감추고 렌더를 굽는데, 2프레임으로는 감춘 것이 화면에 반영되기 전에
+#    읽어 버린다 — 그래서 INSPECT(200프레임)는 깨끗한데 스캔만 물이 낀 화면을
+#    보고, 결함이 충분히 어둡게 안 잡혀 **정지가 늦어졌다**(결함 81mm 앞 →
+#    33mm 앞). 대가는 물이 잠깐씩 깜빡이는 것이다.
+if not HEADLESS and globals().get("waterfx") is not None:
+    SCAN_WARM = int(os.environ.get("SCAN_WARM", 6))
 ARC_STEPS = int(2.0 * PHYSICS_HZ)        # 아크 2초
 COOL_STEPS = int(1.0 * PHYSICS_HZ)
 REPOS_MM = 120.0
 
 state = "SETTLE"
 j2_cmd = 0.0        # J2 지령(m). EXTEND 가 팁 반경 되먹임으로 정하고 ARC 가 문다
+j1_cmd = 0.0        # J1 지령(deg). ALIGN 이 팁 끝 시계각 되먹임으로 정한다
+align_frac = ALIGN_DRIVE_FRAC   # ALIGN 되물림 배율(정체하면 램프가 올린다)
+_align_ref_x = 0.0              # 램프 판정용 직전 팁 끝 x (m)
 t_state = 0
 inspected = False
 repos_from = None
@@ -1643,6 +1788,10 @@ last_raw_hole = None    # 정답 대조 **전**의 원 검출 (주행·정렬 �
 #    정답(`DEFECT_X`/`DEFECT_CLOCK_DEG`)은 판정과 오차 보고에만 남는다.
 det_x = None        # 축방향 위치 (m, 월드)
 det_clock = None    # 시계각 (deg, +Z 에서 +Y 로. DEF_XF 와 같은 규약)
+# APPROACH 가 더 정면인 관측으로 목표를 갱신할 때 쓰는 기준값
+best_hole_px = 0    # 지금까지 본 가장 큰 구멍 면적 (px)
+first_hole_px = 0   # 최초 검출 면적 — 갱신 효과를 로그로 보이려고 남긴다
+first_det_x = None  # 최초 검출 축 위치
 
 
 # ── Stop → Play 로 다시 돌리기 ──────────────────────────────────────
@@ -1658,10 +1807,12 @@ det_clock = None    # 시계각 (deg, +Z 에서 +Y 로. DEF_XF 와 같은 규약
 # ❓ 미검증: `world.reset()` 이 PBD 입자(--water) 위치까지 되돌리는지는 안
 #    돌려봤다. 안 되돌린다면 2회차 물은 흩어진 상태에서 시작한다.
 def restart_demo():
-    global state, t_state, j2_cmd, inspected, repos_from, log, weld_ok
+    global state, t_state, j2_cmd, j1_cmd, align_frac, _align_ref_x
+    global inspected, repos_from, log, weld_ok
     global pre_hole, det_x, det_clock, last_raw_hole
     weld_ok, pre_hole = None, None
     det_x, det_clock, last_raw_hole = None, None, None
+    globals().update(best_hole_px=0, first_hole_px=0, first_det_x=None)
     UsdGeom.Imageable(defect_mesh).MakeVisible()
     UsdGeom.Imageable(bead_mesh).MakeInvisible()
     _bead_op.Set(DEF_XF)
@@ -1672,7 +1823,8 @@ def restart_demo():
         sparks.clear()
     _plug_coll.CreateCollisionEnabledAttr(False)
     world.reset()
-    state, t_state, j2_cmd = "SETTLE", 0, 0.0
+    state, t_state, j2_cmd, j1_cmd = "SETTLE", 0, 0.0, 0.0
+    align_frac, _align_ref_x = ALIGN_DRIVE_FRAC, 0.0
     inspected, repos_from, log = False, None, []
     globals()['inspect_fwd_mm'] = 0.0
     print("=" * 78)
@@ -1808,7 +1960,21 @@ while True:
             _, pre_hole, _ = inspect_defect("수리 전")
             snap("1_before")
             # 🔑 **여기서 주행·정렬 목표가 정해진다 — 카메라로.**
-            _tg = hole_target(last_raw_hole)
+            if KNOWN_DEFECT:
+                # 정답 좌표를 그대로 목표로 쓴다. 카메라 앞 거리만 실제
+                # 기하로 재서 REPOSITION 이 같은 거리로 되돌아갈 수 있게 한다.
+                _XC.Clear()
+                _cm = _XC.GetLocalToWorldTransform(
+                    stage.GetPrimAtPath(FRONT_CAM))
+                _cw = np.array([float(_cm[3][0]), float(_cm[3][1]),
+                                float(_cm[3][2])])
+                _tg = (DEFECT_X, DEFECT_CLOCK_DEG,
+                       float(np.linalg.norm(DEFECT_WORLD - _cw)) * 1000.0)
+                print("  ⚠ **정답 위치 사용(--known-defect)** — 카메라 검출을 "
+                      "건너뛴다. VERIFY 의 '수리 확인' 은 이 모드에서 "
+                      "자기충족이므로 성능 근거로 쓸 수 없다")
+            else:
+                _tg = hole_target(last_raw_hole)
             if _tg is None:
                 # 🚨 정답으로 대신하지 않는다(CLAUDE.md: 감지 실패 시 정답
                 #    fallback 금지). 못 찾았으면 못 고치는 것이고, 그대로 보고한다.
@@ -1817,9 +1983,13 @@ while True:
                 state, t_state = "RESUME", 0
             else:
                 det_x, det_clock, inspect_fwd_mm = _tg
+                # APPROACH 가 더 정면인 관측으로 갱신할 수 있게 기준을 남긴다.
+                first_det_x, first_hole_px = det_x, (pre_hole or {}).get(
+                    "area_px", 0)
+                best_hole_px = first_hole_px
                 _ex = (det_x - DEFECT_X) * 1000.0
                 _ec = ((det_clock - DEFECT_CLOCK_DEG + 180.0) % 360.0) - 180.0
-                print(f"  [목표] **카메라가 정한** 결함 위치 "
+                print(f"  [목표] {'⚠ **정답** 결함 위치' if KNOWN_DEFECT else '**카메라가 정한** 결함 위치'} "
                       f"x={det_x * 1000:+.1f}mm 시계각 {det_clock:+.1f}° "
                       f"(카메라에서 {inspect_fwd_mm:.1f}mm)")
                 print(f"         정답 대비 축 {_ex:+.2f}mm / 원주 {_ec:+.2f}° "
@@ -1837,7 +2007,16 @@ while True:
             # 🔑 **정답을 안 쓰는 정지 조건.** 카메라를 설계 10Hz 로 훑다가
             #    벽면 구멍이 보이면 선다. 예전에는 `ring[0] >= DEFECT_X -
             #    INSPECT_BACK_MM` 이었는데 그건 결함 위치를 미리 아는 것이다.
-            if t_state % SCAN_EVERY == 0 and scan_hole() is not None:
+            if KNOWN_DEFECT:
+                # 시연 모드 — 정답 위치를 알고 설계 촬영 거리에서 선다.
+                if ring[0] >= DEFECT_X - INSPECT_BACK_MM * MM:
+                    inspected = True
+                    drive(0.0)
+                    print(f"[탐지] ⚠ **정답 위치 사용(--known-defect)** — 링 "
+                          f"x={ring[0] * 1000:.1f}mm 에서 정지 "
+                          f"(결함 {INSPECT_BACK_MM:.0f}mm 앞). 카메라 검출 아님")
+                    state, t_state = "INSPECT", 0
+            elif t_state % SCAN_EVERY == 0 and scan_hole() is not None:
                 inspected = True
                 drive(0.0)
                 print(f"[탐지] 벽면 구멍 발견 — 링 x={ring[0] * 1000:.1f}mm "
@@ -1850,7 +2029,27 @@ while True:
             drive(0.0)
             print(f"[APPROACH] 결함 도달 — 링 x={ring[0] * 1000:.1f}mm "
                   f"(카메라가 정한 목표 {det_x * 1000:+.1f}), {t_state} 스텝")
+            if best_hole_px > 0:
+                print(f"           목표는 **가장 크게 보였을 때**({best_hole_px:,}px) "
+                      f"값이다 — 최초 검출({first_hole_px:,}px) 대비 축 "
+                      f"{(det_x - first_det_x) * 1000:+.2f}mm 옮겼다")
             state, t_state = "ALIGN", 0
+        # 🔑 **접근하면서 목표를 다시 잰다** (2026-08-06). 최초 검출은 결함을
+        #    **비스듬히 스쳐 본** 것이라 덩어리 중심이 구멍 중심이 아니다 —
+        #    실측 축방향 오차 4.07mm 였고, ALIGN 이 그 틀린 값을 0.35mm 까지
+        #    충실히 따라가 SWAP 이 4.73mm 로 실패했다(제어가 아니라 입력 문제).
+        #    가까워질수록 정면이 되고 같은 구멍이 크게 보이므로, **가장 크게
+        #    보일 때**의 값을 쓴다. 정답은 여전히 안 본다 — 카메라로 잰 것들
+        #    중에서 가장 정면인 하나를 고르는 것뿐이다.
+        elif t_state % SCAN_EVERY == 0 and not KNOWN_DEFECT:
+            _h = scan_hole()
+            if _h is not None and _h["area_px"] > best_hole_px:
+                _tg2 = hole_target(_h)
+                # 관 축 방향으로 앞쪽(아직 안 지나친 것)만 받는다 — 지나친 뒤의
+                # 검출은 뒤통수를 보는 것이라 기하가 성립하지 않는다.
+                if _tg2 is not None and _tg2[0] > ring[0]:
+                    best_hole_px = _h["area_px"]
+                    det_x, det_clock, inspect_fwd_mm = _tg2
         elif t_state % 400 == 0:
             q = np.asarray(art.get_joint_positions(), dtype=float)
             v = np.asarray(art.get_joint_velocities(), dtype=float)
@@ -1875,32 +2074,74 @@ while True:
         # 🔑 목표는 **카메라가 정한 값**(det_x·det_clock)이다. 정답 좌표는
         #    아래 SWAP 의 판정에만 쓴다 — 제어와 판정을 같은 출처로 두면
         #    자기충족이 된다(CLAUDE.md).
-        ax_mm = (det_x - wpos(_tip)[0]) * 1000.0      # + 면 결함이 아직 앞
+        # 🚨 **축방향도 판정과 같은 점(팁 끝)으로 잰다** (real_map 검증 이식).
+        #    아크는 팁 **끝**에서 일어난다. ALIGN 은 링크 원점으로 닫고 SWAP 만
+        #    다른 점으로 재면 판정이 구조적으로 어긋난다.
+        _tw = tip_end_world()
+        ax_mm = (det_x - _tw[0]) * 1000.0             # + 면 결함이 아직 앞
+        # 🔑 **정지마찰 돌파 램프** (2026-08-06 실측). 설계 12% 지령으로는
+        #    바퀴만 돌고 로봇이 **1μm도 안 나간다** — 8초 타임아웃을 통째로
+        #    쓰고 축 오차 2.68mm 를 남긴 채 ARC 로 가서 용접이 빗나갔다.
+        #    안 움직이는 것이 확인될 때만 지령을 올린다. 움직이기 시작하면
+        #    그 값에서 멈추므로, 잘 움직이는 조건(--water)에서는 12% 그대로다.
+        if t_state % ALIGN_RAMP_EVERY == 0:
+            if abs(ax_mm) > ALIGN_AXIAL_TOL and \
+                    abs(_tw[0] - _align_ref_x) * 1000.0 < ALIGN_MOVE_EPS:
+                align_frac = min(ALIGN_DRIVE_MAX,
+                                 align_frac + ALIGN_RAMP_STEP)
+            _align_ref_x = _tw[0]
         if abs(ax_mm) > ALIGN_AXIAL_TOL:
-            drive(math.copysign(SPIN_DEG_S * 0.12, ax_mm))
+            drive(math.copysign(SPIN_DEG_S * align_frac, ax_mm))
         else:
             drive(0.0)
-        set_torch(j1_deg=det_clock, j2_m=0.0)
-        j1_now = math.degrees(float(art.get_joint_positions()[j1_idx]))
-        _dj1 = ((j1_now - det_clock + 180.0) % 360.0) - 180.0   # ±180 감기
-        _ok = abs(_dj1) < 1.0 and abs(ax_mm) <= ALIGN_AXIAL_TOL
+        # 🚨 **J1 관절값으로 닫으면 안 된다** (real_map 검증 이식). 스프링
+        #    드라이브라 지령과 실제가 벌어지고, 로봇이 관 중심에서 편심해
+        #    있어 같은 J1 이어도 팁이 가리키는 **시계각**이 달라진다.
+        #    실측: J1 오차 1.14° 인데 정렬 오차 2.45mm. → 측정한 팁 끝
+        #    시계각으로 닫는다(P 제어). J2 와 같은 이유·같은 방식.
+        clock_tip = math.degrees(math.atan2(_tw[1] - IN_Y, _tw[2]))
+        err_deg = ((det_clock - clock_tip + 180.0) % 360.0) - 180.0
+        if t_state == 1:
+            j1_cmd = det_clock                        # 되먹임의 출발점
+        j1_cmd = max(-TORCH["j1_limit_deg"],
+                     min(TORCH["j1_limit_deg"], j1_cmd + J1_KP * err_deg))
+        set_torch(j1_deg=j1_cmd, j2_m=0.0)
+        _ok = abs(err_deg) <= J1_TOL_DEG and abs(ax_mm) <= ALIGN_AXIAL_TOL
+        # 🚨 **정체를 로그로 잡는다.** "바퀴가 도는가 / 도는데 로봇이 나가는가"
+        #    를 이 한 줄로 가른다. 램프 배율도 같이 찍어 돌파 여부를 본다.
+        if t_state % 480 == 0:
+            _v = np.asarray(art.get_joint_velocities(), dtype=float)
+            _wv = np.degrees(np.mean([_v[k] for k in wheel_idx]))
+            print(f"  [ALIGN] {t_state:5d}스텝  축 {ax_mm:+6.2f}mm  "
+                  f"시계각 오차 {err_deg:+5.2f}°  휠각속도 {_wv:+7.1f}"
+                  f"(지령 {SPIN_DEG_S * align_frac:.0f}, 배율 {align_frac:.2f})  "
+                  f"팁끝x {_tw[0] * 1000:+7.2f}mm")
         if _ok and t_state > 0.5 * PHYSICS_HZ:
-            print(f"[ALIGN] J1 = {j1_now:+.2f}° (카메라 목표 "
-                  f"{det_clock:+.1f}°), 축방향 오차 {ax_mm:+.2f}mm "
-                  f"(허용 {ALIGN_AXIAL_TOL}mm) — 토치가 결함을 향한다")
+            print(f"[ALIGN] 팁 시계각 {clock_tip:+.2f}° (카메라 목표 "
+                  f"{det_clock:+.1f}°, 오차 {err_deg:+.2f}° = "
+                  f"{PIPE_IR * 1000 * math.radians(abs(err_deg)):.2f}mm), "
+                  f"축방향 {ax_mm:+.2f}mm, J1 지령 {j1_cmd:+.2f}°, "
+                  f"되물림 배율 {align_frac:.2f}")
             state, t_state = "EXTEND", 0
         elif t_state > 8 * PHYSICS_HZ:
-            print(f"[ALIGN] ⚠ 시간 초과 — J1 {j1_now:+.2f}°, 축방향 "
+            print(f"[ALIGN] ⚠ 시간 초과 — 시계각 오차 {err_deg:+.2f}°, 축방향 "
                   f"{ax_mm:+.2f}mm 남은 채로 진행")
             state, t_state = "EXTEND", 0
 
     elif state == "EXTEND":
-        drive(0.0)
+        # 🚨 **여기서 축이 밀린다.** drive(0.0) 으로 두면 J2 가 벽을 밀며
+        #    뻗는 반작용에 로봇이 뒤로 흘러, ALIGN 이 0.33mm 로 닫아 둔 축이
+        #    ARC 끝에 1.71mm 로 벌어졌다(실측). ALIGN 과 같은 되물림을 유지한다.
+        _ax = (det_x - tip_end_world()[0]) * 1000.0
+        if abs(_ax) > ALIGN_AXIAL_TOL:
+            drive(math.copysign(SPIN_DEG_S * align_frac, _ax))
+        else:
+            drive(0.0)
         # 측정한 팁 끝 반경으로 J2 를 닫는다(위 「용접 간극」 절 참조).
         # err > 0 = 너무 뻗었다 → J2 를 줄인다.
         _err = tip_r - TIP_TARGET_R
         j2_cmd = min(max(j2_cmd - J2_KP * _err * MM, 0.0), J2_STROKE)
-        set_torch(j1_deg=det_clock, j2_m=j2_cmd)
+        set_torch(j1_deg=j1_cmd, j2_m=j2_cmd)   # J1 은 ALIGN 이 닫아 둔 지령
         j2_now = float(art.get_joint_positions()[j2_idx])
         _hit_end = j2_cmd <= 1e-9 or j2_cmd >= J2_STROKE - 1e-9
         if (abs(_err) <= J2_TOL and t_state > 0.3 * PHYSICS_HZ) \
@@ -1919,8 +2160,16 @@ while True:
             state, t_state = "ARC", 0
 
     elif state == "ARC":
-        drive(0.0)
-        set_torch(j1_deg=det_clock, j2_m=j2_cmd)
+        # 🚨 **아크 동안 축을 계속 잡아 준다** (real_map 검증 이식). 지령을
+        #    0 으로 줘도 2초 사이에 흘러가 정렬이 문턱(1.5mm)을 오르내렸다
+        #    (실측 1.13 / 1.45 / 1.60mm). ALIGN 과 같은 되물림을 유지한다 —
+        #    램프로 올려 둔 배율을 그대로 쓴다(여기서 새로 올리지는 않는다).
+        _ax = (det_x - tip_end_world()[0]) * 1000.0
+        if abs(_ax) > ALIGN_AXIAL_TOL:
+            drive(math.copysign(SPIN_DEG_S * align_frac, _ax))
+        else:
+            drive(0.0)
+        set_torch(j1_deg=j1_cmd, j2_m=j2_cmd)
         if sparks is None:
             arc_light.GetIntensityAttr().Set(3.0e5)   # 깜빡임은 SparkFX 담당
         if t_state == 1:
@@ -1936,11 +2185,21 @@ while True:
             # 🚨 3차원 직선거리를 쓰면 안 된다 — 설계 용접 간극 2mm 가 그대로
             #    오차로 잡혀 허용치 1.5mm 를 항상 넘는다. 정렬 오차는 **토치가
             #    결함을 겨누고 있는가**, 즉 관벽을 펼친 평면에서의 어긋남이다.
-            align_mm = sequencer.align_error(wall_uv(wpos(_tip)),
-                                             wall_uv(DEFECT_WORLD))
+            # 🚨 **링크 원점이 아니라 팁 끝으로 잰다** (real_map 검증 이식) —
+            #    아크는 팁 끝에서 일어나고, 로봇이 편심해 있어 같은 로드 위의
+            #    두 점이 관 축 기준 **다른 시계각**을 갖는다(실측: 원주 오차가
+            #    링크 원점 1.43mm vs 팁 끝 0.44mm). ALIGN 은 팁 끝으로 닫는데
+            #    SWAP 만 원점으로 재서 판정이 구조적으로 어긋나 있었다.
+            _tipw = tip_end_world()
+            _uv_tip, _uv_def = wall_uv(_tipw), wall_uv(DEFECT_WORLD)
+            align_mm = sequencer.align_error(_uv_tip, _uv_def)
+            # 성분을 남긴다 — 합만 보면 축방향인지 원주인지 못 가른다.
+            print(f"  [정렬] 축방향 {_uv_tip[0] - _uv_def[0]:+.2f}mm  "
+                  f"원주 {_uv_tip[1] - _uv_def[1]:+.2f}mm  합 {align_mm:.2f}mm "
+                  f"(허용 {ALIGN_TOL_MM}mm)")
             aligned = align_mm <= ALIGN_TOL_MM
             # 비드는 **토치가 실제로 있던 축방향 자리**에 놓는다.
-            _bead_dx = wpos(_tip)[0] - DEFECT_X
+            _bead_dx = _tipw[0] - DEFECT_X
             _bead_op.Set(DEF_XF * trans(_bead_dx, 0.0, 0.0))
             # 🔑 수리 표현 = 프림 가시성 전환 (CLAUDE.md 채택 방식)
             UsdGeom.Imageable(bead_mesh).MakeVisible()
@@ -1964,7 +2223,7 @@ while True:
 
     elif state == "COOL":
         drive(0.0)
-        set_torch(j1_deg=det_clock, j2_m=0.0)
+        set_torch(j1_deg=j1_cmd, j2_m=0.0)
         if t_state > COOL_STEPS:
             j2_now = float(art.get_joint_positions()[j2_idx])
             print(f"[COOL/RETRACT] J2 = {j2_now * 1000:.2f}mm 수납")
@@ -2055,6 +2314,13 @@ while True:
                     # 관 안에 가둔다 — 코스 중심선을 그대로 쓰므로 곡관에서도
                     # 정확하다(결함이 곡관 입구 22mm 앞이라 직선 근사는 못 쓴다).
                     confine=spark_confine if _arc_on else None)
+
+    # 시각 물 층 — 흐름 줄무늬를 흘리고, **마개가 착좌하면 누수를 멈춘다**.
+    # 마개는 SWAP 에서 정렬이 허용치 안일 때만 켜지므로, 물이 멎는 것 자체가
+    # "제대로 막았다" 의 표시가 된다(용접 이벤트만으로 멎지 않는다).
+    if waterfx is not None:
+        waterfx.step(1.0 / PHYSICS_HZ,
+                     leaking=not _plug_coll.GetCollisionEnabledAttr().Get())
 
     # state == "DONE" 은 루프 맨 위에서 처리한다(재실행 대기 때문에 여기서
     # break 하면 안 된다). 그래서 이 자리에 DONE 분기가 없다.

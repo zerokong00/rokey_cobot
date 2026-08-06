@@ -1183,11 +1183,17 @@ from welder.spark_fx import SparkFX                       # noqa: E402
 # 🚨 헤드리스에서는 만들지 않는다 — 렌더가 없어 보이지도 않는데 계산만 들고,
 #    판정 경로(INSPECT/VERIFY 촬영)를 건드릴 이유가 없다. 물리에는 어느
 #    모드에서도 관여하지 않는다(콜라이더 없는 PointInstancer 하나).
+# 🚨 **매질 판정은 FLOODED 가 아니라 "입자 물이 실제로 있는가"(WATER) 다**
+#    (2026-08-06, repair_demo 와 같은 이유). --fluid 는 해석적 힘뿐이라 화면에
+#    물이 없는데 스패터만 수중 거동이면 꺼진 것처럼 보인다. SPARK_WET=1 로 강제.
+SPARK_WET = os.environ.get("SPARK_WET", "1" if WATER else "0") == "1"
 sparks = None if (HEADLESS or NO_TORCH) else SparkFX(
-    stage, "/World/weld_sparks", flooded=FLOODED)
+    stage, "/World/weld_sparks", flooded=SPARK_WET)
 if sparks is not None:
-    print(f"[준비] 아크 스파크 — {'수중(급냉·단거리)' if FLOODED else '기중'} "
-          f"조건, 시각 전용(물리·판정 무관)")
+    print(f"[준비] 아크 스파크 — {'수중(급냉·단거리)' if SPARK_WET else '기중'} "
+          f"조건, 시각 전용(물리·판정 무관)"
+          + ("" if SPARK_WET == FLOODED else
+             "   ※ 관은 충수지만 보이는 물이 없어 기중 거동으로 그린다"))
 
 INTR = {"fx": F_PX, "fy": F_PX, "ppx": CAM_W / 2.0, "ppy": CAM_H / 2.0,
         "f_fish": F_PX}
