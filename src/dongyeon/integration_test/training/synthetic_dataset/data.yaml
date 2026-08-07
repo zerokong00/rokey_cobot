@@ -1,0 +1,5 @@
+path: /home/rokey/cobot3_ws/rokey_cobot/src/dongyeon/integration_test/training/synthetic_dataset
+train: images/train
+val: images/val
+nc: 3
+names: ['hole', 'crack', 'bead']

@@ -1,0 +1,162 @@
+[
+  {
+    "file": "img_000000",
+    "split": "train",
+    "cls": "bead",
+    "axial_mm": 44.0,
+    "clock_deg": 253.9,
+    "n_boxes": 1
+  },
+  {
+    "file": "img_000001",
+    "split": "train",
+    "cls": "hole",
+    "axial_mm": 155.6,
+    "clock_deg": 197.5,
+    "n_boxes": 1
+  },
+  {
+    "file": "img_000002",
+    "split": "val",
+    "cls": "bead",
+    "axial_mm": 154.3,
+    "clock_deg": 51.3,
+    "n_boxes": 1
+  },
+  {
+    "file": "img_000003",
+    "split": "train",
+    "cls": "crack",
+    "axial_mm": -82.8,
+    "clock_deg": 33.0,
+    "n_boxes": 1
+  },
+  {
+    "file": "img_000004",
+    "split": "val",
+    "cls": null,
+    "axial_mm": 101.1,
+    "clock_deg": 298.6,
+    "n_boxes": 0
+  },
+  {
+    "file": "img_000005",
+    "split": "train",
+    "cls": "crack",
+    "axial_mm": 81.2,
+    "clock_deg": 252.1,
+    "n_boxes": 1
+  },
+  {
+    "file": "img_000006",
+    "split": "train",
+    "cls": "hole",
+    "axial_mm": 78.1,
+    "clock_deg": 126.1,
+    "n_boxes": 1
+  },
+  {
+    "file": "img_000007",
+    "split": "train",
+    "cls": "hole",
+    "axial_mm": 154.1,
+    "clock_deg": 57.0,
+    "n_boxes": 1
+  },
+  {
+    "file": "img_000008",
+    "split": "train",
+    "cls": "bead",
+    "axial_mm": 36.9,
+    "clock_deg": 4.5,
+    "n_boxes": 1
+  },
+  {
+    "file": "img_000009",
+    "split": "train",
+    "cls": "hole",
+    "axial_mm": 143.8,
+    "clock_deg": 255.2,
+    "n_boxes": 1
+  },
+  {
+    "file": "img_000010",
+    "split": "train",
+    "cls": "bead",
+    "axial_mm": -138.5,
+    "clock_deg": 187.5,
+    "n_boxes": 1
+  },
+  {
+    "file": "img_000011",
+    "split": "train",
+    "cls": "hole",
+    "axial_mm": 68.0,
+    "clock_deg": 14.8,
+    "n_boxes": 1
+  },
+  {
+    "file": "img_000012",
+    "split": "train",
+    "cls": "bead",
+    "axial_mm": -65.3,
+    "clock_deg": 39.1,
+    "n_boxes": 1
+  },
+  {
+    "file": "img_000013",
+    "split": "train",
+    "cls": "hole",
+    "axial_mm": 172.1,
+    "clock_deg": 119.0,
+    "n_boxes": 0
+  },
+  {
+    "file": "img_000014",
+    "split": "train",
+    "cls": null,
+    "axial_mm": 133.6,
+    "clock_deg": 104.3,
+    "n_boxes": 0
+  },
+  {
+    "file": "img_000015",
+    "split": "val",
+    "cls": "crack",
+    "axial_mm": -67.8,
+    "clock_deg": 205.3,
+    "n_boxes": 1
+  },
+  {
+    "file": "img_000016",
+    "split": "train",
+    "cls": null,
+    "axial_mm": -39.8,
+    "clock_deg": 177.1,
+    "n_boxes": 0
+  },
+  {
+    "file": "img_000017",
+    "split": "val",
+    "cls": "bead",
+    "axial_mm": -225.0,
+    "clock_deg": 222.3,
+    "n_boxes": 1
+  },
+  {
+    "file": "img_000018",
+    "split": "train",
+    "cls": "crack",
+    "axial_mm": 157.6,
+    "clock_deg": 155.2,
+    "n_boxes": 1
+  },
+  {
+    "file": "img_000019",
+    "split": "train",
+    "cls": "crack",
+    "axial_mm": 0.9,
+    "clock_deg": 133.8,
+    "n_boxes": 1
+  }
+]
