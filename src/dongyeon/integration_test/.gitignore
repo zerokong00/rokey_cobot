@@ -1,0 +1,17 @@
+# src/son 전용. 루트 .gitignore 는 공용이라 건드리지 않는다.
+
+# 학습 데이터셋 — 268MB. GitHub 는 100MB 넘는 파일을 거부한다.
+# 노트북(.ipynb)은 올라가야 하므로 zip 만 뺀다.
+*.zip
+
+# 시험 장면 — 89MB. test_code/condition/make_scenes.py 로 재생성한다.
+# .png 는 눈으로 확인하는 용도라 남긴다.
+test_code/condition/scenes/*.npy
+
+# 단독판 산출물 (standalone 대역이 저장하는 진단 이미지)
+out/
+
+# 학습 산출물
+training/runs/
+training/*.csv
+training/progress.json

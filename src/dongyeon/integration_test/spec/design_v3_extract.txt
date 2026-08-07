@@ -1,0 +1,1488 @@
+# 배관점검로봇_설계확정본_v3.docx 본문 추출
+# 재생성: tools/extract_design.py
+# 이 파일이 치수의 원천이다. parts_meta.json 은 여기서 파생된다.
+
+배관 점검 및 수리 로봇
+설계 확정본
+협동3 D-3 프로젝트 · Isaac Sim 기반 디지털 트윈 검증
+대상 환경 : DN100 강관 · 가정용 배수관
+로봇 구성 : 정찰 로봇 · 수리 로봇 (동일 섀시)
+개발 기간 : 8일
+작성일 : 2026년 8월 2일
+목차
+TOC \h \o &quot;1-2&quot;
+1. 프로젝트 정의
+1.1 해결하려는 문제
+가정 배관에서 누수가 발생했을 때, 원인 규명 전까지 수리가 불가능하여 피해가 지속되는 문제를 해결한다. 로봇이 배관 내부를 자율 점검하여 결함의 종류·위치·크기를 객관적으로 기록하고, 로봇이 수리 가능한 범위는 즉시 시공하며, 불가능한 범위는 관리자에게 보고한다.
+1.2 디지털 트윈으로 검증하는 이유
+실제 배관 진입 시험은 로봇 파손·배관 손상·회수 실패 위험이 있다.
+결함 시나리오(크랙·구멍·단절)를 반복 재현하려면 실물로는 불가능하다.
+곡관 통과 성공률, 정렬 정밀도 등은 정답을 알아야 정량 측정이 가능하며, 시뮬레이션에서만 정답을 확보할 수 있다.
+1.3 프로젝트 성격
+학생 프로젝트이며 상용화 목적이 아니다. 평가 대상은 물리 엔진 이해도와 ROS 활용도이므로, 실물 제작 가능성보다 시뮬레이션상의 물리적 타당성을 우선한다.
+1.4 초기 기획 대비 변경 이력
+항목
+초기 기획
+확정안
+변경 사유
+구동 방식
+프로펠러 4기 유영형
+6륜 크롤러
+기체 중 부양 추력 부족
+로봇 폭
+직경 40mm
+폭 50mm
+3암 서스펜션 수용
+본체 구조
+일체형 150mm
+2단 1관절
+곡관 통과 및 스트로크 완화
+배관 재질
+PVC
+강관
+용접 수리 성립 조건
+배관 규격
+DN50 배수구
+DN100
+강체 통과 기하 조건
+로봇 대수
+1대
+2대 (정찰·수리)
+역할 분리 및 다중 로봇 운용
+투입 방식
+—
+순차 투입
+회수 안전성 확보
+유체 조건
+미정
+정찰 만관 / 수리 배수
+수중 아크 용접 불가
+관절 구동
+능동
+수동 + 엔코더
+6륜 압착으로 자동 정렬
+2. 로봇 하드웨어 설계
+2.1 공통 섀시
+두 로봇은 동일한 섀시를 사용한다. 차이는 전방 세그먼트 내부 페이로드뿐이다.
+항목
+값
+전체 길이
+150mm (전방 62 + 관절 26 + 후방 62)
+폭 · 높이
+50 × 40mm
+구조
+2단 1관절
+관절
+수동 1개, 엔코더 탑재
+관절 한계각
+±55° (기계식 스토퍼)
+센터링 스프링
+0.01 N·m/rad
+건조 질량
+약 500g
+관절을 수동으로 하는 근거 : 6륜이 각각 9N으로 관벽에 압착되어 있으므로 각 세그먼트는 이미 관 중심축에 정렬되어 있다. 곡관에 진입하면 관 자체가 세그먼트를 제 위치로 밀어넣고 관절은 그 결과를 따라 꺾인다. 능동 구동이 필요 없으며, 엔코더만으로 굽힘 각도와 방향을 측정할 수 있다.
+2.2 벨로우즈
+관절부를 감싸는 실리콘 주름은 방수·방진 외피이며 하중을 전달하지 않는다. 굽힘 시 외측 주름이 펴지며 실효 외경이 증가하므로, CAD 치수는 최대 굽힘 상태의 외곽 포락선으로 측정한다.
+항목
+값
+유연부 길이
+26mm
+몸통 외경
+36mm
+주름
+4산, 피치 6.5mm, 산 높이 2mm
+두께
+1.0 ~ 1.2mm
+최대 외측 신율
+약 49% (파단 신율 대비 충분)
+비틀림 구속: 벨로우즈는 롤 방향이 자유로우므로 안티롤 링크 또는 스플라인 슬리브를 내장한다.
+배선: 굽힘 중립축을 통과시키고 서비스 루프 17mm 이상 확보한다.
+2.3 서스펜션
+항목
+값
+축 구성
+세그먼트당 1축 3암, 총 6륜
+암 배치 (전방)
+0° / 120° / 240°
+암 배치 (후방)
+60° / 180° / 300°
+축 방향 스태거
+세트 내 10mm 간격
+암 길이 / 피벗 반경
+40mm / 12mm
+암 각도 범위
+33.4° ~ 58.2° (정상 44.4°)
+설계 스트로크
+±6mm
+휠 예압
+9N
+반경 방향 등가 강성
+0.9 N/mm
+휠
+Ø20 × 폭 15mm, 크라운 반경 50mm
+암 배치를 60° 어긋나게 하는 이유 : 두 세트를 같은 각도로 정렬하면 로봇 전체가 같은 방향으로 기울 수 있다. 60° 어긋나게 두면 6점이 원주를 균등 분할하여 어느 방향으로 기울어도 저항하는 접촉점이 생긴다.
+축 방향 스태거의 이유 : 3암을 같은 단면에 두면 반경 위치는 고정되나 기울어짐이 구속되지 않는다. 나선형 배치로 접촉점을 비평면화하여 억제한다.
+2.4 스프링 제원
+항목
+값
+재질
+SUS304 또는 SUS316 (피아노선 금지)
+스프링 상수
+3.75 N/mm
+선경 / 평균경
+1.0mm / 6mm (외경 7.0mm)
+유효권수
+9.5
+자유장
+24mm
+장착 위치
+피벗에서 14mm
+지렛대비
+0.49
+정상 상태 하중
+18.4N
+최대 전단응력
+545 MPa &lt; 허용 680 MPa (여유율 1.25)
+2.5 센서
+센서
+배치
+용도
+광각 보어스코프형 RGB-D 카메라
+전방 1 + 후방 1
+결함 검출, 치수 실측, 원형도 판정, 거리 측정
+조명
+전방 + 후방
+관 내부 광원 (유일한 광원)
+IMU
+본체 1
+중력 기준 절대 롤 산출, 요 각속도
+바퀴 엔코더
+6개
+거리 적산, 슬립 감지
+관절 엔코더
+1개
+곡관 진입 감지, 회전 방향 판별
+별도 거리 센서를 두지 않는 이유 : 카메라 Depth가 거리 측정을 겸한다. 급정지 판단용으로는 화면 중앙 영역의 평균 깊이만 사용하면 연산 부담 없이 단일 빔 센서와 동등한 값을 얻는다.
+상용 depth 카메라를 쓰지 않는 이유 : Intel RealSense D455의 최소 측정 거리는 52cm로 관벽 거리 25mm의 20배이며, 본체 치수 124 x 25 x 29mm도 세그먼트 62mm 내부에 수용되지 않는다. Isaac Sim이 제공하는 다른 depth 카메라 자산(RealSense D555, Orbbec Gemini 2·335·Femto Mega, Leopard Imaging Owl, Sensing SG2) 역시 자율주행·서비스 로봇용이라 동일한 제약을 갖는다. 이 스케일에 대응하는 상용 자산은 존재하지 않는다.
+보어스코프를 택한 근거 : 실제 배관 점검 장비는 스테레오 depth 카메라가 아니라 광각 보어스코프를 사용한다. 화각이 넓을수록 원통 관벽을 많이 확보하므로 원형도 판정과 축 오프셋 측정 양쪽에 유리하다.
+카메라 사양 : 어안 투영 수평 화각 140도, 해상도 1280 x 720, 발행 주기 10Hz, 측정 범위 5~5,000mm. 깊이는 카메라 원점 기준 실제 거리를 사용한다(광축 투영 거리가 아니다). RGB는 압축, Depth는 무압축 32FC1로 전송한다.
+시뮬레이션 구현 : 어안 Camera prim에 distance_to_camera 어노테이터를 적용한다. 광선 추적으로 깊이를 산출하므로 최소 측정 거리 제약이 없으며 25mm 근접 벽면도 측정된다. 다만 실물 센서보다 낙관적인 값이므로 실기 성능과 동일하지 않다.
+확인 필요 : 시뮬레이터가 빈 공간의 깊이를 0 / inf / NaN / 최대거리 중 무엇으로 반환하는지 Day 2~3에 확인한다. 이 확인 없이 구현하면 관 단절 판정이 작동하지 않는다. 또한 near clip을 5mm로 둔 상태에서 관벽 25mm가 유효하게 측정되는지 함께 확인한다.
+2.6 용접 모듈 (수리기 전용)
+항목
+값
+자유도
+2
+J1 회전
+±180° (원주 방향 조준, 가로 크랙 추종)
+J2 직동
+스트로크 35mm (축에서 반경 20mm → 48mm)
+회전축 위치
+로봇 축선 (관 중심축과 일치)
+용접봉 직경
+2.0mm (단면적 3.14mm²)
+코일 수용 한계
+약 1,880mm
+접지
+바퀴 접지, 6륜 중 최소 2개 도전성 재질
+회전 + 직동 구조를 택한 이유 : 회전축을 관 중심축과 일치시키면 어느 방향으로 돌려도 토치와 관벽 사이 거리가 일정하다. 관절식(회전 2개)은 직선 팔의 끝점이 원통 벽면을 따라가지 않아 방향에 따라 간극이 변한다.
+±180°인 이유 : 360° 연속 회전은 슬립링이 필요하며, 슬립링은 용접 전류를 흘리기에 부적합하다. ±180°로 전 방향 도달이 가능하고 케이블 꼬임이 발생하지 않는다.
+직동 스트로크 산정
+축에서의 반경
+수납 시 (주행 중)
+20mm — 본체 외곽 25mm 안쪽
+관 내벽
+50mm
+최대 신장 시
+48mm — 용접 간극 2mm 확보
+필요 왕복 거리
+28mm
+설계 스트로크
+35mm (공차 및 중심 편차 여유 포함)
+용접봉 이송 : 회전축 중심을 관통하는 중공 구조로 공급하여 ±180° 회전 시에도 꼬임이 발생하지 않게 한다. 케이블도 동일 경로를 사용한다.
+2.7 전방 세그먼트 배치 및 두 로봇의 차이
+[토치 액추에이터] → [전방 카메라 + 조명] → [용접봉 코일]
+토치가 카메라 시야 일부를 가리지만, 용접 지점을 직접 관측할 수 있어 시공 상태 확인과 수리 직후 검증이 그 자리에서 가능하다.
+항목
+정찰기
+수리기
+섀시 · 서스펜션 · 관절
+동일
+동일
+IMU · 엔코더
+동일
+동일
+카메라 전/후
+동일
+동일
+조명 전/후
+동일
+동일
+용접 액추에이터
+없음
+2자유도
+용접봉 코일
+없음
+탑재
+CAD는 1벌만 작성하고 전방 세그먼트 페이로드만 2종 제작한다. Isaac Sim에서는 기본 USD 하나에 변형(variant) 2개로 처리한다.
+3. 적용 환경
+3.1 배관 사양
+항목
+값
+재질 / 내경 / 두께
+강관 / DN100 / 4mm
+곡관 규격
+SR (R = 1.0D = 100mm), LR (R = 1.5D = 150mm)
+최대 탐사 거리
+30m
+진입점
+샤워실 배수구 (사각 거름망)
+배관 모듈 5종
+직관 500mm / 90° LR 엘보 / 45° 엘보 / T 분기 / 편심 리듀서
+3.2 곡관 통과 기하
+강체 로봇이 곡관을 통과할 수 있는 최대 길이는 로봇 내측면이 관 내벽에 접하는 최악 조건에서 결정된다.
+L_max = 2 × √( (R + D/2)² − (R − D/2 + d)² )
+섀시는 직선이나 배관 중심선은 원호이므로 섀시 축은 원호에 대한 현(弦)이 된다. 이 편차를 서스펜션이 흡수한다.
+s = R_c ( 1 − cos φ ),   φ = arcsin( L / 2R_c ),   필요 스트로크 = ± s / 2
+강체 세그먼트
+LR (R_c=150)
+SR (R_c=100)
+150mm (일체형)
+±10.0mm
+±16.9mm
+120mm
+±6.3mm
+±10.0mm
+62mm (확정)
+±1.6mm
+±2.5mm
+설계 스트로크 ±6mm 대비 SR 기준 여유 2.4배.
+관절 굽힘각  α = 2 arcsin( L / 2R_c )
+곡관
+필요 굽힘각
+한계 ±55° 대비
+LR (R_c=150)
+23.9°
+여유 충분
+SR (R_c=100)
+36.1°
+여유 충분
+결론 : 두 로봇 모두 SR·LR 곡관을 통과한다.
+3.3 유체 조건
+정찰은 만관, 수리는 배수 후 수행한다. 수중 아크 용접이 성립하지 않기 때문이며, 실제 배관 보수 절차와도 일치한다.
+항목
+정찰기 (만관)
+수리기 (배수 후)
+유속
+0.86 m/s
+—
+유체 항력
+2.3N
+0
+부력
+1.77N
+0
+마찰계수
+0.25
+0.35
+구름저항
+1.1N
+1.1N
+총 소요 견인력
+6.5N
+4.2N
+가용 견인력 (6륜 × 9N)
+13.5N
+18.9N
+유속은 매닝 공식으로 산정한다. n은 조도계수(강관 0.010), R_h는 동수반경(만관 원형관 D/4), S는 관 경사(1/100)이다.
+v = (1/n) R_h^(2/3) S^(1/2)
+좁은 관에서는 유체가 로봇을 우회하며 가속되므로 자유유동 기준 항력계수를 그대로 쓰면 심각한 과소평가가 발생한다. 폐색 보정이 필수이다.
+C_d,eff = C_d / ( 1 − β )²
+항목
+값
+로봇 정면적 / 관 단면적
+2,700 mm² / 7,854 mm²
+폐색률 β
+0.34
+C_d,eff
+2.32
+3.4 곡관 횡력 검증
+곡관에서 유체는 곡률 중심 반대편으로 압력 구배를 형성한다. 로봇 폭 50mm에 걸친 압력차 244 Pa, 측면 투영 면적 6.0 × 10⁻³ m² 적용 시 횡력은 약 1.5N (외측 벽 방향)이다.
+dp/dr = ρ v² / R_c = 4,873 Pa/m
+조건
+내측 휠 잔여 예압
+판정
+예압 9N (확정)
+7.5N
+접촉 유지
+예압 4N 가정
+2.5N
+스트로크 변동 시 접촉 상실
+예압 9N의 근거는 정상 주행이 아니라 곡관 통과 조건에 있다.
+4. 임무 시나리오
+4.1 투입 방식
+순차 투입. 정찰기가 임무를 완료하고 복귀한 후에 수리기를 투입한다.
+근거 : 관이 완전히 단절되어 정찰기가 더 진행할 수 없는 상황에서 뒤에 수리기가 따라오고 있으면, 배관 내에서는 회전도 추월도 불가능하므로 두 로봇이 모두 갇힌다. 회수 실패는 곧 배관 폐쇄를 의미한다. 순차 투입은 동시 운용이 불가능해서가 아니라 회수 안전성을 위한 설계 판단이다.
+부수 효과 : 두 로봇 간 충돌 회피, 간격 조율, 대기 위치 결정이 모두 불필요해진다. 또한 정찰 결과로 용접봉 총 소요량을 사전 계산하여 관리자가 필요한 만큼 장착할 수 있다.
+4.2 정찰기 임무 절차
+1) 투입 — 사각 거름망 한 변에 후방 세그먼트 2륜을 걸치고 반대편에 1륜이 오도록 배치
+2) 전진 탐사 — 전방 카메라로 촬영하며 전진, 결함 후보 발견 시 정지하여 정밀 촬영 및 치수 실측
+3) 종료 판정 — 30m 도달, 관 단절, 통행 불가 중 하나
+4) 후진 복귀 — 후방 카메라로 2차 촬영을 수행하며 진입점으로 복귀
+5) 보고 — 결함 목록, 위치, 치수, 용접봉 총 소요량 제출
+4.3 수리기 임무 절차
+1) 용접봉 장착 — 정찰 결과 기반 산출량을 관리자가 장착
+2) 투입 — 정찰기와 동일 방식
+3) 목표 이동 — 정찰기 기록의 거리·시계 방향으로 이동
+4) 재확인 — 목표 지점에서 자체 카메라로 결함 재검출, 최종 정렬
+5) 시공 — 토치 정렬 후 용접
+6) 검증 — 냉각 대기 후 재촬영
+7) 다음 목표 또는 복귀 — 용접봉 소진 시 복귀 및 관리자 알림
+8) 복귀 중 재확인 — 후방 카메라로 수리 지점 재확인 및 미탐지 결함 탐색
+4.4 다중 관측 구조
+동일 결함에 대해 최대 4회 관측이 이루어진다.
+회차
+주체
+방향
+카메라
+1
+정찰기
+전진
+전방
+2
+정찰기
+후진
+후방
+3
+수리기
+전진
+전방
+4
+수리기
+후진
+후방
+등록 규칙: 1회라도 신뢰도 0.8을 초과하면 결함으로 등록하고, 치수는 신뢰도가 가장 높았던 관측값을 채택한다.
+복귀 중 신규 발견 결함: 수리하지 않고 다음 회차로 넘긴다. 용접봉 예산이 이미 계산되어 장착된 상태이므로 계획 외 수리는 예산을 어긋나게 한다.
+임무 성공 정의 : 미수리 결함이 남아도 이를 정확히 인지하고 보고했다면 임무 성공으로 판정한다. 본 시스템의 목적은 완전 수리가 아니라 판단과 보고이다.
+5. 위치 추정
+5.1 롤 기준
+중력 기준 절대 롤을 사용한다. IMU 가속도계로 중력 방향을 읽어 현재 아래쪽이 어디인지를 항상 파악한다. 로봇이 어떻게 투입되었든 중력은 변하지 않으므로, 정찰기와 수리기의 투입 자세가 달라도 결함 위치 기록이 동일한 기준을 공유한다.
+기계적 정렬 병용 : 사각 거름망 한 변에 후방 세그먼트 2륜을 걸쳐 초기 롤 편차를 ±30°에서 ±10° 이내로 줄인다. 다만 로봇이 원형 관 내부로 진입하면 6륜이 재정렬되며 롤이 다시 변하므로, IMU 절대 롤이 최종 기준이 된다. 기준 세그먼트는 후방으로 통일한다.
+5.2 거리 및 방향 추정
+신호
+역할
+바퀴 엔코더 (6개)
+이동 거리 적산 — 주 신호
+관절 엔코더
+곡관 진입 감지 및 회전 방향 — 주 신호
+IMU 요 각속도
+관절 각도 교차 검증 — 보조
+서스펜션 스트로크
+관경 변화·이물 감지 — 보조
+바퀴 엔코더는 6개 값을 평균하여 사용하되, 개별 값의 편차가 크면 슬립 신호로 활용한다.
+5.3 도면 기반 위상 매칭
+배관 도면에서 곡관과 분기점을 노드로 하는 그래프를 구성하고, 로봇이 곡관을 통과할 때마다 노드를 진행시킨다.
+직진 구간: 바퀴 엔코더로 거리 적산 (슬립 오차 누적)
+곡관 통과: 누적 오차를 도면상 해당 노드 위치로 리셋
+이 구조로 오차가 곡관 간 구간 내로 제한된다. 두 로봇의 오도메트리 오차는 서로 다르므로, 정찰기의 거리 값은 개략 위치로만 사용하고 수리기가 목표 지점 근처에서 자체 카메라로 결함을 재검출하여 최종 정렬한다.
+6. 결함 판정 및 용접봉 예산
+6.1 결함 종류
+결함
+정의
+처리
+크랙
+파이프 외벽까지 관통하지 않은 내부 균열
+용접 수리
+구멍
+파이프 벽면을 관통한 개구부
+용접 수리
+조인트 비틀림
+파이프 연결 부위의 축 어긋남
+관리자 보고
+파이프 단절
+관이 완전히 끊어진 상태
+관리자 보고
+6.2 판정 기준
+수리 가능 여부는 용접봉 잔량 단일 기준으로 판정한다. 결함 크기 자체에 대한 제한은 두지 않는다.
+if 결함 == 파이프 단절 or 조인트 비틀림:
+→ 수리 불가, 관리자 보고
+elif 잔량 − 소요량 &gt;= 예비 10mm:
+→ 수리 실행, 잔량 차감
+else:
+→ 위치 기록 후 보고, 정찰 계속
+단일 기준으로 통일한 근거 : 로봇이 수리하지 못하는 이유는 결함이 너무 커서가 아니라 자원이 부족해서이다. 용접봉을 더 장착하면 해결된다. 파이프 단절만 자원과 무관하게 불가능하다.
+예비 10mm를 남기는 이유 : 소요량 산정 오차 때문이다. 잔량을 정확히 0으로 만들면 시공 중 부족이 발생하여 수리 중단이라는 최악의 상태가 된다.
+항목
+값
+검출 신뢰도 하한
+0.8
+등록 조건
+4회 관측 중 1회라도 0.8 초과
+치수 채택
+최고 신뢰도 관측값
+중복 병합 조건
+거리 50mm 이내 + 같은 종류 + 시계 방향 30° 이내
+6.3 용접봉 소요량 산정
+용접은 용접봉이 녹아 결함 체적을 채우는 것이므로, 소모 길이를 결함 체적에서 역산한다. α는 여유계수 1.2(스패터 손실, 덧살), A_rod는 용접봉 단면적(직경 2.0mm 기준 3.14mm²)이다.
+L_req = ( V_defect × α ) / A_rod
+결함
+체적 계산
+예시
+소모 길이
+크랙
+길이 × 폭 × 깊이
+40 × 1.5 × 2.0mm
+46mm
+구멍
+π(d/2)² × 관두께 × 1.3
+d 8mm, t 4mm
+100mm
+6.4 사전 장착량 산정
+정찰 완료 후 관리자에게 총 소요량을 제시한다.
+총 소요 = Σ(각 결함 소요) + 총량의 15%
+항목
+값
+코일 수용 한계
+약 1,880mm (Ø30 코일, 폭 40mm, 20층 기준)
+한계 초과 시
+수리 불가가 아닌 분할 시공 필요로 표기
+우선순위
+구멍(직결 누수) &gt; 관통 크랙 &gt; 표면 크랙
+소진 시 처리
+진입점 복귀, 관리자 알림, 재장착 후 재투입
+7. 검증 체계
+7.1 3단계 구조
+단계
+시점
+판정
+재확인
+목표 도착 직후
+결함이 검출됨 → 정렬 성공
+시공
+용접 중
+—
+검증
+냉각 대기 후 재촬영
+결함이 검출되지 않음 → 수리 성공
+같은 검출기로 같은 위치를 보되, 용접 전에는 검출되어야 하고 용접 후에는 검출되지 않아야 한다. 이 반전이 검증이다.
+7.2 시뮬레이션 구현
+중요 : 용접 이벤트만으로 결함 프림을 무조건 제거하면 검증이 항상 통과하여 성공률이 100%가 된다. 검증이 작동하지 않는다는 뜻이므로 조건을 넣어야 한다.
+if 토치 위치와 결함 위치의 오차 &lt; 허용치:
+결함 프림 숨김 + 비드를 결함 위치에 표시
+→ 검증 촬영 시 미검출 → 성공
+else:
+결함 프림 유지 + 비드를 어긋난 위치에 표시
+→ 검증 촬영 시 여전히 검출 → 실패
+프림 배치: 결함 프림(초기 표시)과 용접 비드 프림(초기 숨김)을 같은 위치에 미리 배치한다.
+허용치: Day 5~6에 20회 이상 실측하여 오차 분포를 확인한 후 결정한다.
+냉각 대기: 결함 크기에 비례하여 5~15초 대기 후 검증 촬영을 수행한다.
+상황
+처리
+검증 실패
+1회 재시도
+재시도 후에도 실패
+보고 전환
+임무 종료 시
+정찰기 결함 목록과 수리기 처리 목록 전수 대조 (감사)
+7.3 용접 결과의 시각화 구현
+수리 성공을 검증하려면 용접 후 결함이 실제로 사라져야 한다. 구현 방식으로 두 가지가 검토되었다.
+방식
+내용
+판정
+색상 덮어쓰기
+RGB 텍스처를 흰색 등으로 덮어 검출을 회피
+배제
+프림 가시성 전환
+결함 프림을 숨기고 용접 비드 프림을 표시
+채택
+색상 덮어쓰기를 배제한 근거
+Depth 카메라는 여전히 균열의 홈을 읽는다. 결함 치수를 Depth로 실측하므로 &quot;보이지 않는데 깊이는 파여 있는&quot; 모순이 발생한다.
+배관 내부는 로봇 조명이 유일한 광원이므로 각도에 따라 음영이 생긴다. 색상 패치는 주변과 반사 특성이 달라 오히려 새로운 검출 대상이 된다.
+용접은 금속을 채우는 공정이며 도색이 아니다. 물리적 타당성이 성립하지 않는다.
+프림 가시성 전환 방식
+결함 프림과 용접 비드 프림을 같은 위치에 미리 배치하고 가시성만 전환한다. USD의 visibility 속성만 변경하므로 연산 비용이 거의 없고 물리 재계산도 필요 없다.
+시점
+결함 프림
+비드 프림
+초기
+표시
+숨김
+용접 성공 후
+숨김
+표시
+용접 실패 시
+표시 유지
+어긋난 위치에 표시
+from pxr import UsdGeom
+def apply_weld(stage, defect, bead, torch_pos, tol):
+err = distance(torch_pos, defect.position)
+if err &lt;= tol:
+UsdGeom.Imageable(defect.prim).MakeInvisible()
+show(bead, at=defect.position)      # 성공
+else:
+show(bead, at=torch_pos)            # 비드만 빗나간 위치
+# 결함 프림은 그대로 유지 → 실패
+비드 프림 형상 : 결함을 메운 형태로 만든다. 크랙은 홈을 채운 볼록한 띠, 구멍은 개구부를 덮은 원반이다. 관 내벽보다 약간 돌출시키면 Depth로도 메워짐이 확인되고, 열영향부 변색을 흉내 낸 재질을 입히면 수리 지점이 영상에 남는다.
+이 방식의 핵심 : 검출기를 속여 안 보이게 만드는 것이 아니라, 형상 자체를 바꾸어 결함이 아니게 만드는 것이다. 그래야 RGB와 Depth 양쪽에서 일관되게 검증이 성립한다.
+확장 아이디어 (챌린지 항목) : 비드를 여러 조각으로 분할해 두고 정렬 오차에 따라 겹치는 조각만 표시하면 &quot;절반만 메워짐&quot; 같은 중간 상태를 표현할 수 있다. 정렬 정밀도 지표가 풍부해지나, 8일 일정에서는 성공/실패 이분법으로 충분하다.
+8. 이상 상황 대응
+8.1 관 단절 판정
+관 내부는 항상 원형이므로 원형이 깨지는 것이 이상 신호이다. 그레이스케일 변환 후 이진화하여 윤곽선을 찾고 원형도를 계산한다. 완전한 원은 1.0이며 찌그러질수록 작아진다.
+원형도 = 4π × 면적 / 둘레²
+신호 1 — 원형도 저하 (카메라). 임계값은 Day 3~4에 정상 주행 데이터 수집 후 결정한다.
+신호 2 — 전방 Depth 급감. 관절 각도 변화가 없으면 곡관이 아니라 막힘이다.
+신호 3 — 서스펜션 압축 이상. 관 단면이 좁아지면 암이 정상 범위를 벗어난다.
+8.2 단절과 끼임의 구분
+상황
+판정 근거
+대응
+관 단절
+원형도 저하 + 전방 거리 급감 + 관절 각도 정상
+즉시 정지, 보고, 복귀
+끼임
+바퀴는 회전하나 거리 적산 정체
+후진 후 재시도 (최대 3회)
+곡관
+전방 거리 감소 + 관절 각도 변화
+정상 통과
+핵심은 바퀴 회전과 실제 이동의 불일치 여부이다.
+8.3 예외 처리 목록
+예외
+대응
+결함 미검출 (신뢰도 &lt; 0.8)
+저속 재접근 후 재촬영, 2회 실패 시 보고
+용접봉 소진
+진입점 복귀, 관리자 알림
+로봇 끼임
+후진 후 재시도, 3회 실패 시 임무 중단 보고
+관 단절
+즉시 정지, 후진 복귀
+토픽 수신 두절
+타임아웃 후 안전 정지
+좌표 변환 실패
+직전 유효 자세 유지, 경고 발행
+30m 도달
+정상 종료, 후진 복귀
+9. 소프트웨어 구조
+9.1 패키지 구성
+패키지
+성격
+빌드 타입
+담당
+pipe_msgs
+인터페이스 정의
+ament_cmake
+공동
+pipe_sim
+Isaac Sim 자산 및 스크립트
+ament_python
+객체팀
+pipe_robot
+ROS 노드 + launch + config
+ament_python
+정찰기팀 + 수리기팀
+의존 방향
+pipe_msgs  ←  pipe_robot
+↑
+pipe_sim
+pipe_msgs는 std_msgs 외에 아무것도 의존하지 않는다. pipe_sim과 pipe_robot은 서로를 의존하지 않으며 토픽으로만 통신한다.
+pipe_msgs 분리 근거 — ROS 2 제약. 순수 파이썬 패키지는 메시지를 생성할 수 없다.
+pipe_sim 분리 근거 — 빌드 성격이 다름. USD 자산은 대용량이며 컴파일 대상이 아니다.
+pipe_robot 통합 근거 — 두 로봇이 코드를 공유하므로 분리하면 동일 코드를 두 벌 관리하게 된다.
+9.2 노드 구성
+구현할 노드는 6종이며 실행되는 인스턴스는 8개이다. 같은 코드를 2번 띄우는 것이며 2벌을 만드는 것이 아니다. 파라미터로 robot_id만 다르게 준다.
+노드 종류
+인스턴스
+위치
+책임
+isaac_sim
+1
+PC1
+물리·렌더·센서 발행
+defect_spawner
+1
+PC1
+결함 랜덤 배치, 정답 발행
+perception_node
+2
+PC2
+결함 검출, 치수 실측, 원형도 판정
+localization_node
+2
+PC2
+위치·방향 추정
+driver_node
+2
+PC2
+주행 제어, 로봇 FSM, 용접 시퀀스
+mission_node
+1
+PC2
+임무 조율, 예산 판정, 보고
+/scout/                      /welder/
+perception_node              perception_node
+localization_node            localization_node
+driver_node                  driver_node
+/                            ← 전역
+mission_node
+defect_spawner
+mission_node만 전역인 이유는 두 로봇의 결과를 통합하는 유일한 지점이기 때문이다. 로봇 네임스페이스 안에 두면 두 로봇을 함께 볼 수 없다.
+순차 투입 중 유휴 노드 처리 : 순차 투입이지만 모든 노드를 동시에 띄운다. launch를 분리하면 평가 항목의 &quot;시작부터 완료까지 전체 파이프라인이 끊김 없이 연결된다&quot;를 충족하지 못한다. 유휴 로봇의 부하는 MissionState의 active_robot을 확인하여 추론을 건너뛰는 게이팅으로 해소한다.
+9.3 파일 분담
+pipe_robot/
+├── perception_node.py      ← 공용 (수리기팀 주관)
+├── localization_node.py    ← 공용 (정찰기팀 주관)
+├── driver_node.py          ← 공용 (주행 제어 공통)
+├── scout_behavior.py       ← 정찰기팀
+├── welder_behavior.py      ← 수리기팀
+├── mission_node.py         ← 공동
+├── overlay_node.py         ← 시연 영상용 (선택)
+├── launch/
+└── config/
+공용 파일의 인터페이스를 변경할 때는 반드시 양 팀이 협의한다.
+9.4 책임 경계
+노드 구조에서 버그가 가장 많이 발생하는 지점은 이 일을 누가 하는지 애매한 것이다.
+노드
+하는 일
+하지 않는 일
+perception_node
+결함 검출, 치수 실측, 원형도 계산
+위치 계산 안 함, 판정 안 함
+localization_node
+거리·방향·롤 추정
+결함을 모름, 제어 안 함
+driver_node
+속도 지령, 중심선 추종, FSM, 용접 시퀀스
+어디로 갈지 스스로 정하지 않음
+mission_node
+결함 등록·병합, 예산 판정, 목표 지시, 보고서
+이미지를 보지 않음, 속도 지령 안 함
+원칙 1 — 이미지는 perception_node 밖으로 나가지 않는다. 검출 결과와 치수만 나간다. 검출 모델을 YOLO에서 HSV로 바꿔도 나머지가 그대로 동작해야 하며, 축소안 발동 시 이 경계가 생명줄이 된다.
+원칙 2 — mission_node는 &quot;어디로&quot;만 말하고 driver_node가 &quot;어떻게&quot;를 한다. 조율 노드가 속도 지령을 직접 내리면 두 로봇 로직이 뒤엉킨다.
+9.5 상태 소유권
+각 데이터를 쓰는 노드는 하나뿐이며 나머지는 읽기만 한다. 결함 목록을 여러 노드가 각자 들고 있으면 어느 쪽이 맞는지 알 수 없게 된다.
+데이터
+소유자
+읽는 쪽
+결함 목록 (registry)
+mission_node
+report, 사용자
+결함 검출 결과 (원시)
+perception_node
+mission
+로봇 위치·방향
+localization_node
+driver, mission, perception
+로봇 FSM 상태
+driver_node
+mission, perception
+용접봉 잔량
+welder/driver_node
+mission
+임무 단계
+mission_node
+전체
+결함 정답
+defect_spawner
+mission
+9.6 노드 실행 모델
+노드
+구동 방식
+주기
+perception_node
+이미지 콜백
+10Hz (게이팅 시 0)
+localization_node
+조인트·IMU 콜백
+50Hz
+driver_node
+타이머 + FSM
+20Hz
+mission_node
+이벤트 + 감시 타이머
+이벤트 / 1Hz
+defect_spawner
+임무 시작 시 1회
+—
+mission_node의 감시 타이머는 예외 처리용이다. 1초마다 각 로봇의 상태를 확인하여 응답 두절이나 끼임을 판정한다. 이벤트만으로는 아무 일도 일어나지 않는 이상을 감지할 수 없다.
+9.7 제어 구조
+로봇별 FSM 2개와 조율 노드로 구성한다. 순차 투입이므로 동시에 한 로봇만 동작한다.
+정찰기 : IDLE → ADVANCE → INSPECT → ADVANCE → ...
+→ END_REACHED → RETURN → DONE
+수리기 : IDLE → WAIT → NAVIGATE → ALIGN → WELD → VERIFY → WAIT → ...
+↓
+OUT_OF_ROD → RETURN
+로봇
+전이
+조건
+정찰
+ADVANCE → INSPECT
+신뢰도 ≥ 0.8 감지
+정찰
+INSPECT → ADVANCE
+치수 실측 완료
+정찰
+ADVANCE → END_REACHED
+30m 도달 또는 관 단절
+수리
+WAIT → NAVIGATE
+수리 임무 수신
+수리
+NAVIGATE → ALIGN
+목표 거리 근접
+수리
+ALIGN → WELD
+정렬 완료
+수리
+WELD → VERIFY
+냉각 대기 경과
+수리
+VERIFY → WAIT
+검증 통과
+수리
+* → OUT_OF_ROD
+잔량 &lt; 최소 소요 + 10mm
+9.8 오픈소스 스택
+용도
+선정
+비고
+미들웨어
+ROS 2 Humble
+고정
+시뮬레이션
+Isaac Sim
+고정
+결함 검출
+Ultralytics YOLOv8
+AGPL이나 비상용이므로 무관
+학습 데이터 생성
+Isaac Sim Replicator
+내장
+영상 처리
+OpenCV + cv_bridge
+HSV 보조 필터, 원형도 계산
+임무 로직
+직접 구현 파이썬 FSM
+외부 라이브러리 미사용
+좌표 관리
+tf2
+시각화
+rqt_image_view, PlotJuggler, rqt_graph
+RViz 미사용
+기록
+rosbag2
+정량 검증 데이터 원본
+로봇 반입
+URDF Importer
+Isaac Sim 내장
+제외
+근거
+Nav2
+배관은 사실상 1차원 경로. 도입 비용 대비 이득 없음
+robot_localization
+엔코더 + 관절 각도 적산으로 충분. 직접 구현이 설명 가능성 측면에서 유리
+BehaviorTree.CPP, py_trees
+학습 비용 대비 이득 없음
+RViz
+Isaac Sim 뷰포트가 동일 역할 수행. 중복
+10. 인터페이스 정의
+본 장의 내용은 Day 1에 확정하고 동결한다. 세 팀 간의 계약이며, 변경 시 커밋 메시지에 [interface] 태그를 붙여 전 팀에 알린다.
+10.1 메시지 — Defect.msg
+perception_node가 치수를 채우고 mission_node가 위치와 판정을 덧붙인다.
+std_msgs/Header header
+uint8 TYPE_CRACK=0
+uint8 TYPE_HOLE=1
+uint8 TYPE_JOINT_OFFSET=2
+uint8 TYPE_RUPTURE=3
+uint8 STATUS_PENDING=0
+uint8 STATUS_PLANNED=1
+uint8 STATUS_REPAIRED=2
+uint8 STATUS_REPORTED=3
+uint8 STATUS_FAILED=4
+uint32  id                 # mission_node가 부여
+uint8   type
+uint8   status
+# 위치 (mission_node가 채움)
+float32 distance_m         # 진입점 기준 관로 거리
+float32 clock_pos          # 원주 방향, 0~12시 (중력 기준)
+uint16  node_index         # 도면상 위상 노드 번호
+# 치수 (perception_node가 채움)
+float32 length_mm          # 크랙 길이
+float32 width_mm           # 크랙 폭
+float32 depth_mm           # 크랙 깊이
+float32 diameter_mm        # 구멍 직경
+float32 offset_mm          # 조인트 축 어긋남
+# 판정 (mission_node가 채움)
+float32 confidence         # 최고 신뢰도 관측값
+uint8   observation_count  # 관측 횟수 (최대 4)
+float32 required_rod_mm    # 용접봉 소요 길이
+치수 필드를 종류별로 나눈 이유는 결함 종류에 따라 의미 있는 필드가 다르기 때문이다. clock_pos를 float으로 둔 이유는 3.5시 같은 중간값을 표현하기 위해서이다.
+10.2 메시지 — PipePose, RobotStatus
+--- PipePose.msg ---
+std_msgs/Header header
+string  robot_id
+float32 distance_m         # 진입점 기준 누적 거리
+float32 heading_deg        # 진입 기준 누적 방위각
+float32 roll_deg           # 중력 기준 절대 롤
+uint16  node_index
+float32 uncertainty_m      # 누적 오차 추정
+bool    node_confirmed     # 곡관 통과로 보정된 직후 여부
+int8    direction          # 1 전진, -1 후진, 0 정지
+--- RobotStatus.msg ---
+std_msgs/Header header
+string  robot_id
+string  state              # FSM 상태명
+bool    healthy
+string  message            # 예외 발생 시 사유
+float32 speed_mps
+float32 rod_remaining_mm   # 정찰기는 0
+float32 joint_angle_deg
+float32[6] suspension_mm   # 6륜 스트로크
+direction은 어느 카메라를 주 카메라로 쓸지 결정한다.
+uncertainty_m은 수리기의 최종 정렬 시 탐색 범위를 결정한다.
+state를 문자열로 둔 이유는 개발 중 FSM 상태가 자주 바뀌기 때문이다.
+suspension_mm은 이상 감지와 디버깅에 쓰인다. 시뮬레이션이 이상할 때 가장 먼저 알려주는 값이다.
+10.3 메시지 — PipeCondition, MissionState, DefectArray
+--- PipeCondition.msg ---
+std_msgs/Header header
+string  robot_id
+float32 circularity        # 원형도, 0~1
+float32 forward_range_m
+bool    passable
+uint8   blockage_type      # 0 정상, 1 단절, 2 끼임, 3 판정불가
+--- MissionState.msg ---
+std_msgs/Header header
+uint8 PHASE_IDLE=0
+uint8 PHASE_SCOUTING=1
+uint8 PHASE_SCOUT_RETURNING=2
+uint8 PHASE_PLANNING=3
+uint8 PHASE_REPAIRING=4
+uint8 PHASE_WELDER_RETURNING=5
+uint8 PHASE_COMPLETE=6
+uint8 PHASE_ABORTED=7
+uint8   phase
+string  active_robot       # 게이팅 신호
+uint16  defects_found
+uint16  defects_repaired
+uint16  defects_reported
+float32 total_rod_required_mm
+float32 elapsed_sec
+--- DefectArray.msg ---
+std_msgs/Header header
+Defect[] defects
+PipeCondition을 결함 검출과 분리한 이유는 소비자가 다르기 때문이다. 결함은 수리 대상으로 mission_node가 받고, 관 상태는 주행 가능 여부로 driver_node가 즉시 반응해야 한다.
+10.4 서비스
+--- EstimateRod.srv ---
+Defect defect
+---
+float32 required_mm
+bool    feasible           # 코일 수용 한계 내인지
+string  note               # &quot;분할 시공 필요&quot; 등
+--- LoadScoutReport.srv ---
+string filepath            # 빈 문자열이면 최신 파일
+---
+bool    success
+uint16  defect_count
+string  message
+--- ResetMission.srv ---
+bool respawn_defects
+int32 seed                 # -1이면 무작위
+---
+bool success
+EstimateRod를 서비스로 분리한 이유는 단위 시험이 쉬워지기 때문이다.
+LoadScoutReport는 개발 중 시간 절약용이다. 수리 로직을 고칠 때마다 정찰 30m를 다시 돌리면 8일 일정이 부족하다.
+seed는 평가 항목의 &quot;Play/Stop 반복 실행 시 동일한 동작 결과가 재현된다&quot;에 직접 대응한다.
+10.5 액션
+--- NavigateTo.action ---
+# Goal
+float32 target_distance_m
+float32 max_speed_mps
+bool    inspect_while_moving
+---
+# Result
+bool    success
+float32 final_distance_m
+string  failure_reason
+---
+# Feedback
+float32 current_distance_m
+float32 progress_ratio
+string  sub_state
+--- Repair.action ---
+# Goal
+uint32  defect_id
+float32 target_distance_m
+float32 target_clock_pos
+float32 required_rod_mm
+---
+# Result
+bool    success
+float32 rod_consumed_mm
+bool    verification_passed
+float32 alignment_error_mm     # 정량 지표용
+float32 alignment_error_deg
+string  failure_reason
+---
+# Feedback
+string  phase                  # NAVIGATE / ALIGN / WELD / COOLDOWN / VERIFY
+float32 progress_ratio
+Result에 정렬 오차를 포함한 이유 : 이 값이 누적되어야 Day 5~6에 정렬 허용 오차를 결정할 수 있다. 액션 결과에 넣으면 자동으로 로그에 남는다.
+액션을 사용하는 이유는 진행 상황을 피드백으로 받아야 하며, 평가 항목이 FSM·Feedback·Fleet 등을 명시하므로 Feedback 사용 자체가 채점 근거가 되기 때문이다.
+액션 서버는 driver_node가, 클라이언트는 mission_node가 맡는다. 이것이 mission은 어디로만 말하고 driver가 어떻게를 한다는 원칙의 구현이다.
+10.6 토픽 네이밍 규칙
+구분
+규칙
+예
+로봇 종속
+로봇 네임스페이스 아래
+/scout/pose
+전역
+슬래시 하나로 시작
+/mission/state
+센서 원시
+sensors/ 하위
+/scout/sensors/front/image_raw
+액션
+동사형, 네임스페이스 안
+/welder/repair
+로봇 노드는 상대 이름을 사용한다. 코드에 &quot;pose&quot;라고만 쓰면 네임스페이스가 자동으로 붙어 /scout/pose가 된다. 절대 경로를 하드코딩하면 두 로봇에 같은 코드를 쓸 수 없다.
+10.7 토픽 목록 — 센서 입력
+토픽
+타입
+주기
+비고
+/{robot}/sensors/front/image_raw/compressed
+CompressedImage
+10Hz
+640×480
+/{robot}/sensors/front/depth
+Image
+10Hz
+32FC1
+/{robot}/sensors/front/camera_info
+CameraInfo
+10Hz
+/{robot}/sensors/rear/image_raw/compressed
+CompressedImage
+10Hz
+/{robot}/sensors/rear/depth
+Image
+10Hz
+/{robot}/sensors/rear/camera_info
+CameraInfo
+10Hz
+/{robot}/joint_states
+JointState
+50Hz
+바퀴6+관절1+서스6
+/{robot}/imu
+Imu
+50Hz
+/clock
+Clock
+—
+시뮬레이션 시간
+/tf, /tf_static
+TFMessage
+—
+압축 전송을 기본으로 한다. 1080p 30Hz 원본은 초당 180MB이지만 640×480 10Hz 압축은 1MB 수준이며, 두 PC 사이를 흐르는 데이터이므로 차이가 크다.
+Depth는 압축하지 않는다. 손실 압축이 깊이 값을 훼손한다. 대신 결함 검출 시에만 구독하도록 게이팅한다.
+/clock은 평가 항목에 직접 명시되어 있다. use_sim_time을 켜고 모든 노드에 파라미터로 전달한다.
+10.8 토픽 목록 — 제어 출력 및 노드 간 데이터
+토픽
+타입
+주기
+비고
+/{robot}/cmd_vel
+Twist
+20Hz
+linear.x만 사용
+/{robot}/wheel_cmd
+Float64MultiArray
+20Hz
+6륜 개별 속도
+/welder/torch_cmd
+Float64MultiArray
+10Hz
+[회전각, 신축량]
+/welder/weld_trigger
+Bool
+이벤트
+아크 on/off
+cmd_vel과 wheel_cmd 중 하나만 사용한다. 1차 구현은 cmd_vel로 진행하고, 곡관에서 전후 세그먼트 속도 차등이 필요해지면 wheel_cmd로 전환한다. 동시에 발행하지 않도록 주의한다.
+토픽
+타입
+발행 → 구독
+주기
+/{robot}/pose
+PipePose
+localization → driver, mission, perception
+20Hz
+/{robot}/status
+RobotStatus
+driver → mission, perception
+5Hz
+/{robot}/condition
+PipeCondition
+perception → driver, mission
+10Hz
+/{robot}/defect_raw
+Defect
+perception → mission
+이벤트
+/mission/state
+MissionState
+mission → 전체
+1Hz
+/mission/registry
+DefectArray
+mission → report, 사용자
+이벤트
+/ground_truth/defects
+DefectArray
+spawner → mission
+시작 1회
+/{robot}/condition이 driver로 직행하는 유일한 예외이다. 관 단절과 끼임은 즉시 정지해야 하므로 mission_node를 경유하면 지연이 발생한다.
+10.9 QoS 설정
+대상
+Reliability
+Durability
+Depth
+이미지, Depth
+BEST_EFFORT
+VOLATILE
+1
+joint_states, imu
+BEST_EFFORT
+VOLATILE
+10
+cmd_vel, wheel_cmd
+RELIABLE
+VOLATILE
+1
+pose, status, condition
+RELIABLE
+VOLATILE
+10
+defect_raw
+RELIABLE
+VOLATILE
+50
+/mission/state
+RELIABLE
+TRANSIENT_LOCAL
+1
+/mission/registry
+RELIABLE
+TRANSIENT_LOCAL
+1
+/ground_truth/defects
+RELIABLE
+TRANSIENT_LOCAL
+1
+이미지는 BEST_EFFORT로 설정한다. RELIABLE로 두면 재전송이 누적되어 지연이 폭증한다. Isaac Sim은 기본이 BEST_EFFORT이므로 구독자도 맞춰야 하며, 맞지 않으면 토픽이 아예 수신되지 않는다. 가장 흔한 함정이다.
+상태성 데이터는 TRANSIENT_LOCAL로 설정한다. 늦게 기동한 노드도 마지막 값을 받아야 한다. 특히 /ground_truth/defects는 임무 시작 시 1회만 발행되므로, 이 설정이 없으면 나중에 뜬 노드는 정답을 수신하지 못한다.
+10.10 tf 트리
+map                              # 배관 도면 원점
+├─ scout/base_link              # localization_node 발행
+│   ├─ scout/front_link         # Isaac Sim 발행 (관절 각도)
+│   │   ├─ scout/front_camera
+│   │   └─ scout/front_light
+│   └─ scout/rear_link
+│       └─ scout/rear_camera
+└─ welder/base_link
+├─ welder/front_link
+│   ├─ welder/front_camera
+│   └─ welder/torch_link    # 액추에이터 2자유도
+└─ welder/rear_link
+└─ welder/rear_camera
+변환
+발행자
+종류
+map → {robot}/base_link
+localization_node
+동적
+base_link → front_link
+Isaac Sim
+동적 (관절)
+front_link → torch_link
+Isaac Sim
+동적 (액추에이터)
+나머지
+Isaac Sim
+정적
+base_link는 후방 세그먼트에 둔다. 투입 기준을 후방 세그먼트로 정했으므로 일관성이 유지된다.
+11. 실행 및 개발 환경
+11.1 파라미터 파일
+파일
+내용
+robot_common.yaml
+주행 속도, PID 게인, 카메라 설정
+robot_scout.yaml
+정찰 전용 (탐사 거리 30m, 촬영 주기)
+robot_welder.yaml
+수리 전용 (용접봉 초기량, 냉각 시간)
+thresholds.yaml
+신뢰도 0.8, 원형도, 병합 조건, 정렬 허용 오차
+rod_budget.yaml
+여유계수 1.2, 봉 직경, 예비 10mm, 코일 한계
+physics_flooded.yaml
+만관 물리 (정찰기)
+physics_drained.yaml
+배수 물리 (수리기)
+pipe_map.yaml
+도면 위상 노드 정의
+하드코딩된 숫자가 하나라도 있으면 평가 항목의 저장소 완결성에서 감점된다. 특히 thresholds.yaml은 Day 3~6에 계속 채워질 파일이므로 처음부터 자리를 만들어 둔다.
+11.2 launch 구성
+pipe_robot/launch/
+├── sim.launch.py          # PC1 — Isaac Sim 연동, spawner
+├── robot.launch.py        # 로봇 1대분 노드 3개 (인자로 robot_id)
+├── mission.launch.py      # mission_node
+└── full.launch.py         # 전체 (README에는 이것만 안내)
+# full.launch.py 개념
+include(robot.launch.py, {robot_id: &quot;scout&quot;})
+include(robot.launch.py, {robot_id: &quot;welder&quot;})
+include(mission.launch.py)
+launch 파일 하나로 두 로봇을 기동하는 것이 평가 항목의 다중 로봇 증빙이 된다.
+11.3 결과 파일 (JSON)
+노드 간 통신에는 JSON을 사용하지 않는다. ROS 2는 이미 타입이 정의된 메시지를 사용하므로 이중 작업이 된다. JSON은 임무 결과를 파일로 남기는 용도에만 사용한다.
+results/
+├── ground_truth_&lt;시각&gt;.json    # 스포너가 배치한 정답
+├── scout_report_&lt;시각&gt;.json    # 정찰 결과
+└── repair_log_&lt;시각&gt;.json      # 수리 실적
+관리자에게 제출할 보고서의 원본
+수리 임무 재실행 시 정찰을 다시 수행하지 않기 위한 입력 (LoadScoutReport.srv)
+정답과 대조한 지표 계산
+실패한 실행도 삭제하지 않는다. 평가 항목에 실패 원인과 한계를 분석했다가 별도로 있으며, Repair.action의 failure_reason 필드가 그 근거가 된다.
+11.4 다중 PC 설정
+항목
+값
+ROS_DOMAIN_ID
+동일 값
+ROS_LOCALHOST_ONLY
+0
+RMW
+rmw_fastrtps_cpp (기본)
+시간 동기
+두 PC에 NTP 필요
+use_sim_time
+전 노드 true
+ROS_LOCALHOST_ONLY는 배포판에 따라 기본값이 1이라 같은 PC 안에서만 통신된다. 두 PC가 연결되지 않으면 이 항목부터 확인한다.
+11.5 개발 규칙
+항목
+규칙
+로그 레벨
+정상 동작 DEBUG, 상태 전이 INFO, 예외 WARN 이상
+거리 단위
+미터. 필드명에 _m 명시
+치수 단위
+밀리미터. 필드명에 _mm 명시
+각도 단위
+메시지는 도(deg), 내부 계산은 라디안
+시간
+전 노드 use_sim_time: true
+브랜치
+main + 팀별 브랜치, 매일 1회 병합
+커밋
+인터페이스 변경 시 [interface] 태그
+8일 안에 인터페이스가 한 번쯤은 변경된다. 그때 다른 팀이 즉시 인지할 수 있는 장치가 필요하다.
+11.6 구현 순서
+순서
+대상
+선행 조건
+1
+pipe_msgs
+없음 — 병목 지점
+2
+전 노드 스켈레톤 + 모의 발행기
+msgs
+3
+driver_node (주행만)
+시뮬레이션 씬
+4
+localization_node
+driver 주행
+5
+perception_node
+학습 데이터
+6
+mission_node
+없음 — 병렬 개발 가능
+7
+통합
+전부
+mission_node는 처음부터 병렬 개발이 가능하다. 결함 메시지를 수동 발행하면 판정 분기를 전부 시험할 수 있으므로 시뮬레이션 진척과 무관하다.
+모의 발행기를 각 노드마다 하나씩 준비한다. 상대 노드 없이 자기 노드를 시험할 수 있게 하는 장치이며, 8일 일정에서 이것이 없으면 서로 대기하다 종료된다.
+11.7 Day 1 완료 기준
+pipe_msgs 빌드 성공, 세 팀 모두 import 가능
+인터페이스 정의를 저장소 docs/interface.md에 커밋
+full.launch.py가 빈 노드로 기동, rqt_graph에 8개 노드 표시
+각 팀 모의 발행기 1개씩 동작
+두 PC 간 ros2 topic list 상호 확인
+rqt_graph 스크린샷 저장 (최종 발표에서 Day 1 대비 최종본 비교용)
+12. Isaac Sim 파라미터
+12.1 서스펜션 조인트 드라이브
+스프링을 형상으로 모델링하지 않고 조인트 드라이브의 강성으로 구현한다. 조인트 드라이브는 내부적으로 스프링-댐퍼 식을 암시적(implicit)으로 처리하므로, 명시적 외력 방식보다 수치적으로 안정하다.
+τ = stiffness ( target − q ) − damping q̇
+--- 스윙암 (Revolute Joint) ---
+axis              : 접선 방향
+limits            : 33.4° ~ 58.2°
+drive mode        : position
+targetPosition    : 60°            (상한 밖)
+stiffness         : 0.74  N·m/rad
+damping           : 0.009 N·m·s/rad
+maxForce          : 0.257 N·m      (= 예압 9N)
+--- 직동식 (Prismatic Joint), 1차 검증용 ---
+limits            : ±6 mm
+stiffness         : 900 N/m
+damping           : 30  N·s/m
+maxForce          : 9   N
+목표 각도를 조인트 상한 밖에 두고 maxForce로 제한하면 위치와 무관하게 일정 예압이 발생한다. 실제 정하중 스프링과 동일한 거동이다.
+12.2 필수 물리 설정
+contactOffset       : 0.0005 m
+restOffset          : 0
+물리 스텝            : 1/240 이상 (불안정 시 1/500)
+솔버 반복 (position) : 32
+솔버 반복 (velocity) : 4
+주의 : Isaac Sim 기본 contactOffset은 0.02m(20mm)이다. 휠 반경 10mm 스케일에서는 접촉이 실제 표면보다 훨씬 앞에서 발생하여 로봇이 공중에 뜬 것처럼 거동한다. 이 설정 누락이 가장 빈번한 실패 원인이다.
+12.3 물리 재질 설정 파일
+physics_flooded.yaml   # 정찰기
+friction_static   : 0.30
+friction_dynamic  : 0.25
+rho               : 1000    kg/m³
+v_flow            : 0.855   m/s
+C_d_eff           : 2.32
+A_frontal         : 2.7e-3  m²
+V_disp            : 1.8e-4  m³
+added_mass        : 0.09    kg
+physics_drained.yaml   # 수리기
+friction_static   : 0.40
+friction_dynamic  : 0.35
+유체력 항목 전부 비활성
+12.4 충돌체 및 메시
+대상
+설정
+배관 (정적)
+physics:approximation = &quot;none&quot; — 삼각 메시 직접 사용
+휠 (동적)
+실린더 프리미티브
+로봇 본체
+캡슐 또는 볼록 분해
+벨로우즈
+시각 메시만, 충돌체 부여 금지
+스프링
+시각 메시만, 충돌체 부여 시 자기 충돌로 발산
+곡면을 다각형으로 근사할 때 생기는 오차는 활꼴 높이로 계산한다. 원주 방향 64분할(오차 0.06mm), 곡관 원호 방향 2.5° 스텝 이상을 적용한다. 분할이 부족하면 카메라 영상에 각진 면이 나타나 학습 데이터가 오염되고, 존재하지 않는 모서리에서 허위 충돌이 발생한다.
+s = r ( 1 − cos( π / n ) )
+12.5 결함 모델링 및 도메인 랜덤화
+결함
+구현
+크랙
+깊이 0.3~1.5mm, 길이 10~50mm 얕은 홈 + 노멀 맵
+구멍
+직경 2~8mm 관통 개구부 (불리언 컷)
+조인트 비틀림
+두 세그먼트 간 Xform 변환값 조정 (축 1~5mm, 각도 1~5°)
+파이프 단절
+세그먼트 간 변환값 대폭 조정
+용접 비드
+각 결함 위치에 숨김 상태로 미리 배치
+모든 결함에 Replicator semantic label을 부착하여 세그멘테이션 정답 데이터를 자동 생성한다.
+랜덤화 대상
+범위
+결함 개수
+3~8개
+결함 종류
+크랙 / 구멍 / 조인트 비틀림 / 단절
+결함 위치
+축 방향 거리, 시계 방향 위치
+결함 치수
+크랙 길이 20~80mm, 구멍 직경 4~12mm
+조명 강도·색온도
+Replicator 랜덤화
+카메라 노출
+Replicator 랜덤화
+조명과 노출을 고정값으로 두고 학습하면 실환경 일반화 성능이 확보되지 않는다.
+13. 정량 검증 지표
+지표
+정의
+결함 검출률
+검출 수 / 스폰 수
+오검출률
+허위 검출 수 / 총 검출 수
+관측 회차별 검출률
+1~4회차 누적 검출률 개선
+위치 추정 오차
+진입점 기준 거리 오차 (mm)
+시계 방향 추정 오차
+각도 오차 (°)
+정렬 정밀도
+목표 대비 실제 정지 위치 편차
+수리 성공률
+검증 통과 수 / 수리 시도 수
+예산 판정 정확도
+산정 소요량 대비 실사용량 일치율
+곡관 통과 성공률
+통과 수 / 진입 수 (SR·LR 구분)
+단절 판정 정확도
+정탐 / 오탐 비율
+임무 완료 시간
+진입부터 복귀까지
+용접봉 활용 효율
+실사용량 / 장착량
+정답 데이터 : defect_spawner가 실제 배치한 결함 목록을 발행하므로 검출률과 위치 오차를 자동 산출할 수 있다. 랜덤 스폰 상태로 20~30회 반복 실행하여 분포를 확보한다.
+14. 설계 한계
+발표 시 명시할 항목이다.
+한계
+내용
+분기관 경로 선택 불가
+관절이 수동이므로 T자 분기에서 진행 방향을 능동 선택할 수 없다. 단일 경로 배관을 대상으로 하며, 분기 구간은 별도 진입점 사용을 전제한다.
+순차 투입 시간 비용
+동시 운용 시 임무 시간을 단축할 수 있으나, 관 단절 시 회수 실패 위험으로 순차 투입을 선택했다. 안전성과 효율의 트레이드오프이다.
+만관 용접 불가
+수중 아크 용접이 성립하지 않아 수리 단계에서 배수를 전제한다. 배수 자체는 로봇이 수행하지 않는다.
+파이프 단절 수리 불가
+구조적 손상이므로 로봇이 대응할 수 없다. 굴착 교체 판단은 사람이 내려야 한다.
+원주 방향 대형 결함
+토치 접근 자세 유지 범위는 약 ±45°(원주 길이 78mm)이다. 초과 시 분할 시공 또는 보고 전환한다.
+센서 적용 한계
+상용 depth 카메라는 최소 측정 거리가 관벽 거리 25mm를 크게 초과하여(D455 기준 52cm) 적용할 수 없다. 광각 보어스코프를 가정하고 시뮬레이션에서는 광선 추적 기반 깊이로 대체한다. 광선 추적 깊이는 최소 측정 거리 제약이 없어 실물 센서보다 낙관적이므로, 시뮬레이션 결과가 곧 실기 성능을 보장하지 않는다. 실기 적용 시 근접 측정이 가능한 센서로의 전환이 필요하다.
+15. 미결 사항
+항목
+결정 시점
+시뮬레이터 빈 공간 깊이 반환 방식 확인
+Day 2~3
+개구부 형상 임계값 (원형도·윤곽 산포)
+Day 3~4 (정상 주행 데이터 수집 후)
+정렬 허용 오차
+Day 5~6 (20회 이상 실측 후)
+용접 후 냉각 대기 시간
+임의 설정 가능
+토치 회전축과 카메라 간섭 확인
+CAD 작업 중
+ROS 2 메시지 및 토픽 정의
+설계 확정 직후
+16. 설계 과정에서 놓쳤던 지점
+초기 기획을 물리적 타당성 기준으로 검토하면서 드러난 문제들이다. 대부분은 실제로 계산해 보기 전까지 드러나지 않았다.
+16.1 곡관 통과 기하 — 설계 전체를 되돌린 지점
+직선 배관만 상정하고 로봇 길이를 정했으나, 곡관에서는 강체 길이가 통과 가능 여부를 직접 결정한다. 로봇 섀시는 직선인데 배관 중심선은 원호이므로 섀시 축은 원호에 대한 현(弦)이 되고, 그 편차를 서스펜션이 흡수해야 한다.
+강체 길이
+LR 곡관 필요 스트로크
+SR 곡관 필요 스트로크
+150mm (일체형)
+±10.0mm
+±16.9mm
+120mm
+±6.3mm
+±10.0mm
+62mm (2등분)
+±1.6mm
+±2.5mm
+설계 스트로크 ±6mm 기준으로 일체형 150mm는 SR·LR 모두 통과하지 못한다. 본체를 2등분한 것은 형상 취향이 아니라 이 계산의 결과이며, 강체 단위가 62mm로 줄면서 필요 스트로크가 6배 이상 완화되었다.
+같은 이유로 초기 기획의 DN50 샤워 배수구 직접 진입도 성립하지 않는다. 트랩 곡률이 SR급이라 통과 가능한 최대 강체 길이가 74.8mm에 불과하다.
+16.2 수리 공법과 유체 조건의 충돌
+만관을 전제로 유체력을 계산해 놓고 용접을 수리 방식으로 정했으나, 수중 아크 용접은 성립하지 않는다. 정찰은 만관, 수리는 배수 후로 분리했다. 실제 배관 보수 절차와도 일치하며, 정찰기의 유체력 시뮬레이션은 그대로 유지된다.
+16.3 검증 로직의 자기충족 문제
+&quot;용접 후 결함이 사라지면 성공&quot;으로 정의했으나, 시뮬레이션에서 용접 이벤트만으로 결함을 제거하면 성공률이 항상 100%가 된다. 검증이 작동하지 않는다는 뜻이다. 정렬 오차 조건을 추가하여 실패가 실제로 발생하도록 했다. 7.2절과 7.3절 참조.
+16.4 그 밖의 수정 항목
+항목
+초기 상정
+수정 근거
+로봇 대수
+단일 로봇
+관 단절 시 자원 배분과 회수 전략이 성립하지 않음. 정찰기·수리기 분리 후 순차 투입
+구동 방식
+프로펠러 4기 유영형
+기체 중 부양에 필요한 추력이 소형 프로펠러 실측치의 두 배 이상. 바퀴 구동으로 전환
+배관 재질
+PVC
+민간 배관은 대부분 PVC이며 용접 대상이 아님. 강관으로 고정
+관절 구조
+실리콘 단독 굽힘
+필요 모멘트가 가용 모멘트의 30배 초과. 기계식 관절과 외피의 역할 분리
+판단 주체
+결함 탐지를 로봇 내부 기능으로 표기
+센서의 물리적 위치와 연산의 실행 위치는 다름. 판단은 전부 제어 시스템에서 수행
+바퀴 구동 전환의 부수 효과 : 견인력이 부력이 아닌 스프링 예압에서 발생하게 되어, 만관과 배수 상태 어느 쪽에서도 견인력이 보존된다. 이 특성이 정찰과 수리를 서로 다른 유체 조건에서 수행할 수 있게 하는 근거가 되었다.
+16.5 발표 시 강조할 항목
+위 항목 중 곡관 통과 기하(16.1), 수리 공법과 유체 조건(16.2), 검증 로직(16.3) 세 가지를 우선 제시한다. 모두 계산을 통해 초기 판단이 뒤집힌 사례이므로 공학적 검토 과정을 보여주기에 적합하며, 특히 16.3은 평가 항목의 &quot;실패 원인과 한계를 분석했다&quot;에 직접 대응한다.
+부록 A. 용어 정리
+용어
+내용
+USD
+Universal Scene Description. Pixar가 개발·공개한 3D 장면 기술 포맷이며 Isaac Sim의 네이티브 포맷
+URDF
+Unified Robot Description Format. ROS 생태계의 로봇 구조 기술 포맷
+ROS 2
+Robot Operating System 2. 로봇 소프트웨어 프레임워크
+DDS
+Data Distribution Service. ROS 2의 기반 통신 규격
+FSM
+Finite State Machine(유한 상태 기계)
+IMU
+Inertial Measurement Unit(관성 측정 장치)
+DN
+Diameter Nominal(공칭 직경). 프랑스어 diamètre nominal에서 유래한 ISO 6708 표기
+SR / LR
+Short Radius(R = 1.0D) / Long Radius(R = 1.5D). 엘보 곡률 규격
+롤 (roll)
+진행 방향 축을 중심으로 한 회전. 항공기 용어에서 유래
+피치 (pitch)
+좌우축을 중심으로 한 회전
+요 (yaw)
+상하축을 중심으로 한 회전
+벨로우즈
+bellows. 본래 &quot;풀무&quot;를 뜻하며, 주름 접힘으로 길이·각도가 변하는 구조
+탄성계수
+Young&apos;s modulus. 응력 대 변형률의 비. 영국 과학자 Thomas Young에서 유래
+스프링 상수
+spring constant. 단위 변위당 발생 힘. 재료와 형상의 결합 결과
+매닝 공식
+Manning formula. 아일랜드 기술자 Robert Manning의 개수로 평균유속 경험식
+부가질량
+added mass. 가속 시 주변 유체를 함께 밀어내며 발생하는 겉보기 질량
+과구속
+over-constrained. 구속 조건이 자유도보다 많아 해가 부정정이 되는 상태
+특이점
+singularity. 기구가 특정 자세에서 특정 방향 운동 능력을 상실하는 지점
+스트로크
+stroke. 직선 운동 부품이 움직일 수 있는 거리
+폐색률
+blockage ratio. 관 단면적 대비 물체 단면적의 비
+원형도
+circularity. 도형이 완전한 원에 가까운 정도
+부록 B. 주요 수식
+용도
+수식
+곡관 통과 최대 강체 길이
+L_max = 2 √( (R + D/2)² − (R − D/2 + d)² )
+현-호 편차
+s = R_c ( 1 − cos φ ),  φ = arcsin( L / 2R_c )
+필요 스트로크
+± s / 2
+관절 굽힘각
+α = 2 arcsin( L / 2R_c )
+암 반경 위치
+r = r_p + ℓ sin ψ
+코일 스프링 상수
+k = G d⁴ / ( 8 D_m³ n )
+견인력
+F = Σ ( μ N )
+매닝 유속
+v = (1/n) R_h^(2/3) S^(1/2)
+항력
+F_d = ½ ρ C_d A v |v|
+폐색 보정
+C_d,eff = C_d / ( 1 − β )²
+부력
+F_b = ρ g V
+곡관 압력 구배
+dp/dr = ρ v² / R_c
+조인트 드라이브
+τ = stiffness ( target − q ) − damping q̇
+용접봉 소요량
+L_req = ( V_defect × α ) / A_rod
+테셀레이션 오차
+s = r ( 1 − cos( π / n ) )
+원형도
+4π × 면적 / 둘레²
