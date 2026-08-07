@@ -160,10 +160,15 @@ def render(state, offset_mm=0.0, seed=0, rough=0.0, lumpy=1.0, advance_mm=0.0):
 SCENES = [
     ("normal", "NORMAL", 0.0, 0.0, 1.0),
     ("normal_noisy", "NORMAL", 0.0, 0.002, 1.0),
-    ("misalign_2mm", "MISALIGNMENT", 2.0, 0.0, 1.0),
-    ("misalign_5mm", "MISALIGNMENT", 5.0, 0.0, 1.0),
+    # 🚨 주행 스펙 재보정 (2026-08-07): 오프셋 문턱 1/3/8 → 6/12/25mm.
+    #    실측으로 정상 주행의 이탈이 평균 5~15mm 라(전 코스), 구 문턱이면
+    #    정상 주행도 감속·정지 판정을 받는다(reducer 안착 4mm → 감속
+    #    12mm/s → 정지 마찰에 져 출발 정체 사망 실측). 2·5mm 는 이제
+    #    주행상 정상이다 — 장면 이름은 기하(실제 이탈량)를 그대로 남긴다.
+    ("misalign_2mm", "NORMAL", 2.0, 0.0, 1.0),
+    ("misalign_5mm", "NORMAL", 5.0, 0.0, 1.0),
     ("misalign_12mm", "MISALIGNMENT", 12.0, 0.0, 1.0),
-    ("misalign_5mm_noisy", "MISALIGNMENT", 5.0, 0.002, 1.0),
+    ("misalign_5mm_noisy", "NORMAL", 5.0, 0.002, 1.0),
     ("disconnected", "DISCONNECTED", 0.0, 0.0, 1.0),
     ("disconnected_off", "DISCONNECTED", 4.0, 0.0, 1.0),
     ("undetermined", "UNDETERMINED", 3.0, 0.0, 1.0),

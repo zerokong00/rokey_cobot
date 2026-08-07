@@ -113,6 +113,13 @@ def main():
     print("끼임 3회 초과 → 임무 중단")
     c5 = DriveController()
     run(c5, 20, cond=cond(), start=True)
+    # 2026-08-07 — 거리 적산이 시각 오도메트리 기반이 되면서 제자리 끼임
+    # (시각 0.0)은 거리를 만들지 않는다. 그 전에는 휠 적분이라 끼임 중에도
+    # 거리가 쌓여 이 시나리오가 우연히 성립했다. "나가다 끼었다" 를 반영해
+    # 실제 전진(시각=휠)을 먼저 쌓는다 — 안 그러면 4회째 포기 시점에 이미
+    # 출발점이라 RETURN 이 즉시 DONE 으로 끝나 버린다(그것도 올바른 동작이다).
+    for _ in range(100):
+        c5.step(DT, cond=cond(), wheel_mps=c5.s.v_cmd, visual_mps=c5.s.v_cmd)
     for _ in range(4):
         for _ in range(30):
             c5.step(DT, cond=cond(), wheel_mps=0.08, visual_mps=0.0)

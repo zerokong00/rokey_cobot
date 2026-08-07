@@ -23,12 +23,12 @@
       "invalid_ratio": 0.0
     },
     "misalign_2mm": {
-      "truth": "MISALIGNMENT",
+      "truth": "NORMAL",
       "offset_mm": 2.0,
       "invalid_ratio": 0.0
     },
     "misalign_5mm": {
-      "truth": "MISALIGNMENT",
+      "truth": "NORMAL",
       "offset_mm": 5.0,
       "invalid_ratio": 0.0
     },
@@ -38,7 +38,7 @@
       "invalid_ratio": 0.0
     },
     "misalign_5mm_noisy": {
-      "truth": "MISALIGNMENT",
+      "truth": "NORMAL",
       "offset_mm": 5.0,
       "invalid_ratio": 0.0
     },
