@@ -128,6 +128,22 @@ python3 tools/view_active_cam.py
   ros2 run rqt_image_view rqt_image_view   # GUI로 직접 보고 싶으면
   ```
 
+### 4-3. YOLO 2차검증 PC(PC2, 선택) — active_cam_vision
+
+`active_cam` 뷰어와는 별개로, `/repair_robot/active_cam/{rgb/compressed,which}`를 그대로 구독해 YOLO 추론을 돌리고 싶을 때만 켠다. 안 켜도 미션은 정상 진행되고(§5-2), 로그에 "의견 없음"만 찍힌다.
+
+```bash
+source /opt/ros/humble/setup.bash
+cd ~/cobot3_ws
+colcon build --packages-select pipe_inspect_demo   # 최초 1회 (워크스페이스 루트는 rokey_cobot이 아니라 그 상위 ~/cobot3_ws)
+source install/setup.bash
+ros2 run pipe_inspect_demo active_cam_vision
+```
+
+- 출력: `/defect/detected`(Bool), `/defect/report_json`(String, JSON), `/defect/debug_image/compressed`(`yolo_viewer`용) — `real_map_demo.py`의 `ActiveCamBridge`가 앞의 둘을 구독해 §5-2 로그를 만든다.
+- Isaac Sim PC와 분리된 별도 PC 권장(GPU 컨텐션 회피) — 같은 PC에서 돌려도 동작은 하지만 두 프로세스가 GPU를 나눠 써서 느려질 수 있다.
+- 예전엔 `pipe_vision`(front_camera 고정, Depth/Odom/IMU 필요)을 썼는데, 한 로봇이 정찰+수리를 동시에 하도록 구조가 바뀌면서 축 위치 추적(Odom/IMU)이 필요 없어져 `active_cam_vision`으로 교체했다(2026-08-07) — **`pipe_vision`과 동시에 띄우지 말 것**, 둘 다 같은 `/defect/detected`,`/defect/report_json`을 발행해서 충돌한다.
+
 ---
 
 ## 5. 통신 인터페이스 (ROS2)
@@ -141,6 +157,36 @@ QoS(양쪽 동일하게 맞춰야 함): `BEST_EFFORT` / `KEEP_LAST` / `depth=1`.
 |---|---|---|---|
 | `/repair_robot/active_cam/rgb/compressed` | `sensor_msgs/CompressedImage` | 그때그때 **활성 카메라 하나**의 JPEG(품질 85). `format="jpeg"`, `header.frame_id`에 카메라 이름(`front_camera`/`back_camera`/`torch_camera`) | 10Hz 목표(실측 ~8.5Hz, 물리 스텝 부하에 따라 변동) |
 | `/repair_robot/active_cam/which` | `std_msgs/String` | 지금 발행 중인 카메라 이름 그 자체(`data` 필드) — 위 이미지가 어느 카메라 것인지 판별용 | 이미지와 같은 주기로 같이 발행 |
+
+### 5-1. active_cam 에 얹은 YOLO 2차검증 (2026-08-07, `PipeVisionBridge`에서 교체)
+
+처음엔 `pipe_vision_node`(front_camera 고정, RGB/Depth/CameraInfo/Odom/IMU 5-토픽 동기화, Odom/IMU 기반 축 위치 추적)를 위해 별도 `PipeVisionBridge`를 만들었는데, 정찰+수리를 **한 로봇**이 동시에 하는 구조로 바뀌면서 축 위치를 YOLO 쪽에서 따로 추적할 이유가 없어졌다(이미 OpenCV 쪽 코스 s좌표로 확정됨) — 그래서 **Depth·Odom·IMU가 아예 필요 없는** 새 노드 `active_cam_vision`(`pipe_inspect_demo/pipe_inspect_demo/active_cam_vision_node.py`)으로 교체했다. `PipeVisionBridge` 클래스와 `/rgb`,`/depth`,`/camera_info`,`/odom`,`/imu`,`/inspection/reset` 토픽은 real_map_demo.py에서 완전히 제거됐다.
+
+`active_cam_vision`은 **이미 발행 중인 `/repair_robot/active_cam/{rgb/compressed,which}`를 그대로 구독**한다 — Isaac 쪽에 새 발행자가 필요 없다(§5 표의 두 토픽 재사용). 카메라가 front/back/torch 뭐로 바뀌든 상관없이 들어오는 프레임에 YOLO Seg를 돌린다. YOLO 2차검증 의견(`/defect/detected`,`/defect/report_json`) 구독은 `real_map_demo.py`의 `ActiveCamBridge`가 맡는다(`yolo_opinion()` 메서드, node는 그대로 `repair_robot_active_cam` 하나).
+
+| 토픽 이름 | 메시지 타입 | 내용 | 방향 |
+|---|---|---|---|
+| `/defect/detected` | `std_msgs/Bool` | 이번 프레임에 결함(등록 문턱 0.8 이상)을 봤는지 | active_cam_vision → Isaac |
+| `/defect/report_json` | `std_msgs/String` | JSON — `camera`(어느 액티브캠), `class`,`confidence`,`area_px`,`center_pixel`,`detections_count`. **축 위치 필드 없음**(Odom 없이 계산 불가) — `_log_yolo_opinion`이 `try/except KeyError`로 이미 방어돼 있어 축위치 비교만 생략되고 에러는 안 남 | active_cam_vision → Isaac |
+| `/defect/debug_image/compressed` | `sensor_msgs/CompressedImage` | YOLO 박스/마스크 오버레이 — `yolo_viewer`가 구독. 결함이 화면 밖으로 나가도 마지막 검출을 계속 그린다(고정 위치라 실제 화면과 안 맞을 수 있음, 시각 참고용) | active_cam_vision → (yolo_viewer) |
+
+Depth 없이 추론하는 경로(`YoloSegDetector.infer_rgb_only()`)는 물리 치수(길이/폭 mm)를 측정하지 않는다 — 애초에 YOLO는 참고용 2차 의견이라 크기는 OpenCV 쪽(§1) 것만 쓴다.
+
+**알려진 한계**: active_cam 세 카메라(front/back/torch) 모두 어안 140°인데 YOLO 모델은 640×640 핀홀로 학습됐다 — 화면 가장자리·극단적 근접(용접 중 torch_camera처럼)일수록 검출 정확도가 떨어질 수 있다. 특히 ARC(용접) 중엔 토치 팁/로드와 아크 스파크(시각 전용 효과)가 결함 자리를 실제로 가리므로, 그 순간 미검출은 학습 문제라기보다 원래 안 보이는 장면일 가능성이 크다(OpenCV 쪽도 같은 이유로 VERIFY를 ARC 도중이 아니라 COOL/REPOSITION 이후에 함).
+
+### 5-2. OpenCV 1차 · YOLO 2차검증 (2026-08-07 추가)
+
+배경: 기존 `pipe_vision_node`는 정찰 로봇 + 수리 로봇 2대 구조를 전제로 만들어졌는데, 지금은 한 로봇이 정찰과 수리를 동시에 한다. 그래서 **OpenCV(`find_wall_hole`/`find_weld_bead`)가 1차·확정 판정**을 그대로 유지하고, **YOLO는 2차·참고용 의견**으로만 나란히 로그에 남긴다 — YOLO가 없거나(PC2 미실행) 느려도 미션은 절대 안 죽는다(`yolo_opinion(max_age_s=3.0)`이 3초 넘게 소식 없으면 `None`="의견 없음"으로 명확히 구분, "결함 없다고 봄"과 혼동하지 않음).
+
+| 시점 | 로그 태그 | 비교 대상 |
+|---|---|---|
+| INSPECT (결함 등록 직후) | `[YOLO 2차검증·INSPECT]` | OpenCV 검출 여부 + 축위치(mm) 비교 |
+| RECHECK (재확인 촬영 후) | `[YOLO 2차검증·RECHECK]` | 위와 동일 |
+| VERIFY (용접 완료 판정 직후) | `[YOLO 용접완료·2차검증]` | 비드(색) 판정(`ok`)과 YOLO의 "여전히 크랙 보이는가"(반전 비교) — 일치/불일치만 로그, **판정 자체는 그대로 비드가 함** |
+
+절대 YOLO 의견으로 OpenCV/비드 판정을 대체하지 않는다 — `weld.py` 자체 문서가 경고하는 "자기충족적 검출기" 함정을 피하기 위한 설계.
+
+2026-08-07 실측 확인(`--floor2 --glass --hold`, PC2/YOLO 미실행 상태 — 당시엔 `PipeVisionBridge` 기준으로 확인했고 이후 `active_cam_vision`으로 교체했지만 "구독자 없으면 None" 방어 로직은 동일하게 옮겨졌다): INSPECT/RECHECK/VERIFY 세 지점 모두 에러·Traceback 없이 "의견 없음" 로그가 정상 출력됨 — YOLO 부재 시 우아한 저하(graceful degradation) 확인됨.
 
 ### 활성 카메라 전환 규칙 — `active_camera_name(state)`
 
@@ -191,10 +237,18 @@ PYTHONUNBUFFERED=1 isaac_python real_map_demo.py
 
 `--shots`는 안 붙여도 ROS2 영상은 그대로 나온다 — PNG 파일도 같이 남기고 싶을 때만 끝에 추가.
 
-### ROS 노드 PC (별도 터미널)
+### ROS 노드 PC (별도 터미널) — 영상 확인
 
 ```bash
 source /opt/ros/humble/setup.bash
 cd ~/cobot3_ws/rokey_cobot/src/dongyeon/integration_test
 python3 tools/view_active_cam.py
+```
+
+### YOLO 2차검증 PC (선택, 별도 터미널/PC)
+
+```bash
+source /opt/ros/humble/setup.bash
+source ~/cobot3_ws/install/setup.bash
+ros2 run pipe_inspect_demo active_cam_vision
 ```

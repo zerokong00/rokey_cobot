@@ -1,52 +1,45 @@
 #!/usr/bin/env python3
-"""맵·로봇 **주행 연습장** — 벨로우즈 12륜 + CAD 배관 3종.  [Isaac 3.11]
+"""[Isaac 3.11] **실전 맵 자율주행** — `restroom_final0807` 화장실 배관망.
 
-`repair_demo.py` 의 주행 부분만 떼어 온 **연습 파일**이다.
+`map_test_demo.py` 의 **자율주행 스택을 그대로** 쓰고 코스만 실전 맵으로
+바꾼 것이다(2026-08-08 사용자 지시). 그래서 이 파일에는 주행 경로가 없다:
 
-🎯 **기준 로봇 = 용접기 내장 v2** (`robot_v2/robot_from_bot_welder_art_v2.usda`,
-   2026-08-07 사용자 지시). 벨로우즈 12륜(`robot_v2_12wheel.usda`)으로도 돌지만
-   `ROBOT_USD=...` 로 명시해야 한다. **로직은 하나이고 설정값만 자산별**이다
-   (`TUNING`) — 조인트는 이름이 아니라 **구조**로 찾으므로(`discover()`)
-   자산을 갈아끼워도 같은 코드가 그대로 돈다.
+  ❌ **경로 하드코딩 없음** — 중심선은 **채점(이탈·진행도) 전용**이고,
+     조향·감속·분기 선택은 전부 `condition/detector.py` + `driver/control.py`
+     가 카메라 depth 로만 한다(`NAV=vision`). 도면을 주지 않는다.
+  ✅ 로봇 = **용접기 내장 v2** (오늘까지 T·곡관·reducer 로 검증한 그 로봇)
+  ✅ 판정 = 원통 전제(관경 추적) + 양옆 개구로 T/곡관 구분 + 부하 보상 증속
 
-아래 둘이 없다:
+━━ 맵 실측 (restroom_final0807.usd, map mm, upAxis Z, metersPerUnit 0.001) ━━
+  진입   샤워 배수구 사각 거름망 (330,850) — **구 맵과 같은 진입점**
+  floor2 z_net −250. (330,850)→(680,850)→(680,1400)→(1200,1400)→(1200,600)
+         →(1500,600) 막다른 끝. 총 2,533mm.
+         🔑 **구 맵의 ø90 병목이 없어졌다** — 실측 내반경 49.1mm 전 구간 균일
+            (구 맵은 s 960~1660 이 45mm 라 우회로 없는 병목이었다).
+  floor1 z_net −2740.2. **닫힌 루프다**(0807 개정판의 핵심 — 사용자 확인:
+         *"한바퀴 순회전 하도록 했어"*):
+             진입 (330,850) →+X→ ★T (730,850)★
+             ├ −Y 팔 → (730,100) →+X→ (1300,100) →+Y→ 합류(1300,750)
+             └ +Y 팔 → (730,1400) →−X← (1300,1400) ←−Y← 합류(1300,750)
+         두 팔이 x=1300 에서 만나 **한 바퀴가 닫힌다.**
+         🎯 **임무 규칙(오른손 법칙)이 그대로 성립한다**: +X 로 진행하며 T 를
+            만나면 오른쪽 = travel×up = (+X)×(+Z) = **−Y 팔**로 나가고, 루프를
+            한 바퀴 돌아 **+Y 팔에서 T 로 복귀**해 진입 라이저로 나온다.
+         🔑 T 실측(730,850): 정면(+X) 50mm 벽, −Y 731mm·+Y 531mm 열림 =
+            **정면 T**(양옆 개구) — 오늘 tee_go 로 검증한 바로 그 장면이다.
 
-  ❌ **물이 없다** — `--water`(PBD 입자)도 `--fluid`(해석 항력)도, 시각 물 층도
-     통째로 뺐다. 관 상태는 **배수(건식)** 고정이라 마찰은 0.40/0.35 다.
-  ❌ **결함이 없다** — 관통 개구·비드·마개·용접 시퀀스·카메라 검출이 전부 없다.
-     여기는 고치는 곳이 아니라 **굴려 보는 곳**이다.
-
-배관 4종을 **관 5개 · 로봇 5기**로 깐다(2026-08-07 사용자 지시) — T 만
-정방향·역방향을 따로 굴린다. 곡관은 CAD 원본 하나를 두 자세로 쓴다:
-
-  ┌ elbow_v     fixed_pipe.stp                   — **수직 곡관**. 가다 위로 꺾인다
-  ├ elbow_h     fixed_pipe.stp                   — **수평 곡관**. 같은 관을 굴렸다
-  ├ tee_s1      tee_sweep_..._oneside.stp        — **T 분기 · 본관 → 가지**
-  ├ tee_s1_rev  (같은 관, 중심선 반전)           — **T 분기 · 가지 → 본관**
-  └ reducer     reducer_dn100_dn150_dn100.stp    — **관경 변화** DN100→150→100
-
-**기본은 5대 동시**다 — 코스마다 로봇이 한 대씩 들어가 각자 제 관을
-**왕복 반복**한다(끝 → 복귀 → 다시). 끼이면 방향을 뒤집어 빠져나온다.
-한 대만 보고 싶으면 `--course elbow_v` 처럼 고른다. 이때 **그 관만 올라온다.**
-비교용 판은 `--course tee_s`(양방향 블렌드) / `tee_s2`(`_narrow`) 로 부른다.
+🚨 맵 usd 는 `metersPerUnit 0.001` 인데 스테이지는 1.0(m) 이다 — 참조 Xform 에
+   scale 0.001 을 명시한다. 안 하면 건물이 2.5km 로 들어온다.
+🚨 맵 usd 를 Isaac GUI 에서 **저장(Ctrl+S)하지 말 것** — 형상 없는 껍데기가
+   원본을 덮어쓴다(기록된 사고).
+🚨 활성 층 배관만 콜라이더를 준다 — 다른 층·건물 셸은 렌더만. 삼각형을 줄이고
+   무엇보다 다른 층 관을 잘못 잡는 것을 막는다.
 
 실행:
-  isaac_python map_test_demo.py --headless                 # 로그로 확인
-  DISPLAY=:1 isaac_python map_test_demo.py --hold          # GUI, 창 닫을 때까지
-  DISPLAY=:1 isaac_python map_test_demo.py --course tee --hold
-  isaac_python map_test_demo.py --course elbow_h --headless
-
-옵션
-  --course {all,elbow_v,elbow_h,tee_s1,tee_s1_rev,reducer,tee_s,tee_s2}  기본 all = **5대**
-  --cam          카메라 6대를 만든다 (기본 꺼짐 — GUI 가 크게 느려진다)
-  --glass        배관을 반투명으로 — 밖에서 로봇이 보인다 (물리 영향 0)
-  --steps N      최대 물리 스텝 (기본 9000)
-  SPEED_MPS=0.10 주행 속도. WHEEL_MAXFORCE=0.14 휠 토크. PHYSICS_HZ=240
-
-🚨 배관 USD 는 `maps/*.usd` 다 — `tools/step_to_usd.py` 가 STEP 에서 구운 것이고
-   `.gitignore` 의 `*.usd` 때문에 git 으로는 안 따라간다. 없으면 다시 구울 것:
-     isaac_python tools/step_to_usd.py ~/Downloads/fixed_pipe.stp
-     isaac_python tools/step_to_usd.py ~/Downloads/tshape_test.stp
+  isaac_python real_map_demo_v1_1.py --headless                 # floor1(기본)
+  DISPLAY=:1 isaac_python real_map_demo_v1_1.py --glass --hold
+  isaac_python real_map_demo_v1_1.py --course floor2 --headless
+옵션·노브는 map_test_demo 와 같다 (SPEED_MPS·FAIL_S·GUI_EVERY·CTL_DEBUG…).
 """
 
 import json
@@ -466,6 +459,14 @@ NAV = os.environ.get("NAV", "onboard")
 STEER_ONBOARD_DEG = float(os.environ.get("STEER_ONBOARD_DEG", 40.0))
 
 ROLL_DEG = float(os.environ.get("ROLL_DEG", 0.0))
+# 🎯 바퀴 차동 속도 (2026-08-08 신설) — 굽힘에서 바깥 바퀴를 빠르게.
+DIFF_ON = os.environ.get("DIFF", "0") == "1"
+# 🚨 **기본 OFF** (2026-08-08 실측): 켜니 floor2 가 s 969 → **355** 로 후퇴했다
+#    (진입 곡관에서 이탈 1.4mm 로 잘 정렬된 채 **전진만 못 함** = 안쪽 바퀴가
+#    브레이크처럼 끈 정황). 개념은 맞지만 부호·크기를 실측으로 가려야 한다.
+#    DIFF_SIGN 으로 부호를, DIFF_GAIN 으로 세기를 바꿔 실험한다.
+DIFF_SIGN = float(os.environ.get("DIFF_SIGN", 1.0))
+DIFF_GAIN = float(os.environ.get("DIFF_GAIN", 1.0))
 
 # 안착 궤적을 0.25초마다 찍는다 (수직관에서 흘러내리는지 진단).
 SETTLE_TRACE = os.environ.get("SETTLE_TRACE", "0") == "1"
@@ -525,247 +526,128 @@ def make_mesh(path, stl, color=None, xform=None):
         UsdGeom.Xformable(mesh).AddTransformOp().Set(xform)
     return mesh
 
-# ── 코스 3종 ────────────────────────────────────────────────────────
-# CAD 실측(STEP 곡면 + 변환 USD 정점, 단위 mm):
-#   fixed_pipe  내반경 50 / 외 55, 굽힘 R150(LR).  중심선 =
-#     (0,350,0) →(−Y 진행)→ (0,150,0) → R150 원호 → (0,0,150) →(+Z)→ (0,0,250)
-#   tshape_test 내반경 50 / 외 55.  중심선 = (0,−250,0) ↔ (0,250,0) 직관,
-#     y=0 에서 +Z 로 250 올라가는 가지
-#
-# 🔑 **세 코스 모두 입구 직관이 월드 +X 를 향하도록 눕힌다.** 그러면 로봇
-#    배치(PLACE)와 진행 판정이 repair_demo 와 한 글자도 안 달라진다.
-#    Rz(+90°) 이 원본의 −Y 진행을 +X 로 보낸다.
-# 🔑 **수평 곡관은 같은 관을 진행축으로 굴린 것**이다 — Rx(90°) 은 월드 X 축
-#    (=진행 방향)을 그대로 두고 위로 가던 출구만 −Y 로 눕힌다. 관을 새로
-#    만들지 않는다("있는 것을 고칠 수 있는지 먼저 본다").
-# 🚨 변환 USD 는 `metersPerUnit 0.001` 이다 — 미터 스테이지에 그냥 참조하면
-#    1000배로 들어온다. 참조 Xform 에 scale 0.001 을 명시한다(real_map_demo
-#    와 같은 처리).
-_ELBOW = MAPS / "fixed_pipe.usd"
-# 🚨 **배관은 STEP 으로 받아 `tools/step_to_usd.py` 로 굽는다.** 직접 저작한
-#    `.usda` 판은 면·법선·중복이 다 정상인데도 PhysX 가 못 받아 로봇이 닿는
-#    즉시 발산했다(실측). 변환기로 구운 판은 다른 CAD 배관과 같은 경로라 정상.
-_RED = MAPS / "reducer_r.usd"
-# 🎯 **양방향 스위프 T** (R185, 2026-08-06 STEP 수령). 가지는 본관에 수직이지만
-#    접합부 목이 본관 **양쪽 모두**와 R185 로 블렌드된다 — 각도가 아니라
-#    곡률로 푸는 형상. 로봇 요축 한계 55° 로는 각진 90° 를 못 돌지만 R150
-#    곡관은 통과한다는 실측에서 나온 요청이다.
-_TEES = MAPS / "tee_sweep.usd"
-# 🎯 **한쪽만 스위프한 T** (R185, 2026-08-07 STEP 수령). 양방향 판이 개구를
-#    원주 ±93mm 로 벌려 다리가 밀 벽을 잃은 것에 대한 재요청분이다.
-#    실측(`scratchpad/measure_tee.py`) — 내 50 / 외 55, 삼각형 1,625,
-#    본관 X −400~+400, 가지 x=0 에서 +Z 로 800.
-#    🔑 **개구 원주폭 109.1mm (±54.5mm)** — 양방향 판 ±93mm 에서 줄었다.
-#      개구 축방향 구간 x −50~+145 로 **+X 쪽으로 치우쳐** 있다 = 블렌드가
-#      본관 **+X 다리와 가지** 사이에만 있다. 그래서 매끄러운 경로는
-#      `본관 +X → R185 원호 → +Z 가지` 이고, 원호 중심은 (+185, 0, +185) 다
-#      (양방향 판의 (−185,0,185) 와 좌우가 뒤집힌다).
-_TEES1 = MAPS / "tee_sweep_r185_dn100_oneside.usd"
-# 🚨 **`_narrow` 는 이름과 달리 더 넓다** (2026-08-07 수령·실측). 개구 원주폭을
-#    ≤100mm 로 좁혀 달라고 요청했는데 **109.1 → 126.5mm(145°)** 로 벌어졌고
-#    축방향도 195 → 230mm 로 길어졌다. 형상 자체는 같은 계열(내 50/외 55,
-#    본관 X ±400, 가지 x=0 에서 +Z 800, 블렌드는 +X 쪽 한 곳).
-_TEES2 = MAPS / "tee_sweep_r185_dn100_oneside_narrow.usd"
-# 🔑 **각진 T** — 접합부에 곡률이 전혀 없는 원래 형상 (2026-08-07 사용자 지시:
-#    *"이번에는 각진 T로 해보자"*). 실측: 내 50 / 외 55, **본관은 Y 축**
-#    (−250~+250), 가지는 +Z 로 250, 삼각형 2,676.
-#    ⚠ 스위프 판의 "목"은 내가 만든 것이 아니라 `CAD_요청_분기관.md`(08-06)
-#      에서 요청해 받은 것이다 — 각진 T 로는 분기 진입이 안 돼 곡률을 요청했다.
-_TEEA = MAPS / "tshape_test.usd"
-_ANG_R = float(os.environ.get("ANG_R", 90.0))
+# ── 실전 맵 코스 (restroom_final0807) ───────────────────────────────
+# 🔑 **중심선은 채점 전용이다.** 주행(조향·감속·분기 선택)은 카메라 depth 만
+#    보는 자율 스택이 한다 — 아래 좌표는 이탈량·진행도를 재고 로봇을 출발
+#    지점에 놓는 데만 쓴다. 코너는 직선의 교점이고 필렛 R150(LR)이 끼워진다.
+# 🔑 실측 근거는 파일 머리말 참조(맵 메시 31개 bbox + 12방위 광선 내반경).
+_MAP = MAPS / "restroom_final0807.usd"
+_BEND_R = 150.0                    # LR 곡관 굽힘 반경 (map mm)
 
 
-# 🚨 **2026-08-07 거울상 수정** — 사용자가 GUI 로 세 번 지적한 "턴이 반대"의
-#    실체. 이전 정의는 두 코스 모두 월드 기준 **왼손 턴**이었다(수치 검증:
-#    진행방향×상방(+Z) 과 탈출방향의 내적 −1.0). 코스 배치(Rz−90·Rx90)에서
-#    CAD +Y 팔 = 월드 +X, CAD −Y 팔 = 월드 −X, CAD stem(+Z) = 월드 −Y 이므로
-#    - tee_go  : stem(월드 −Y 쪽)에서 +Y 로 접근 → 오른쪽 = 월드 +X = **CAD +Y 팔**
-#    - tee_back: 왼팔 = 월드 −X = **CAD −Y 팔**에서 +X 로 접근 → 오른쪽 턴 = stem
-#    이전 정의는 정확히 이 반대(CAD y 부호가 뒤집힘)였다. 각진 T 는 좌우
-#    대칭이라 y 만 뒤집으면 되고, 기존 진입·후진 기동 검증은 그대로 유효하다.
-# 🚨 (2026-08-07 원복) 다리에 600mm 직관을 연장하는 안은 **폐기** — 사용자
-#    요청은 "기존 관 안에서 양끝을 더 쓰라"였고, 연장은 개구 광선이 가지 관
-#    안으로 달아나 곡관 판별자를 깨는 부작용까지 냈다(덤프 실측). 양끝 확대는
-#    START_S·END_S 여유 축소로 한다.
-def _tee_ang_out(R=None):
-    """각진 T — **왼팔(CAD −Y) → 본관 stem(+Z)**. 월드 기준 오른손 턴."""
-    R = _ANG_R if R is None else R
-    pts = [(0.0, y, 0.0) for y in np.linspace(-245.0, -R, 40)]
-    pts += [(0.0, -R + R * math.sin(a), R - R * math.cos(a))
-            for a in np.linspace(0.0, math.pi / 2, 26)[1:]]
-    pts += [(0.0, 0.0, z) for z in np.linspace(R, 245.0, 26)[1:]]
-    return np.array(pts)
+def _fillet(corners, R=_BEND_R, n=18):
+    """코너 목록(교점) → R 필렛이 끼워진 중심선 점열(map mm).
 
-
-def _tee_ang_in(R=None):
-    """각진 T — **본관 stem(+Z) → 오른팔(CAD +Y)**. 월드 기준 오른손 턴."""
-    R = _ANG_R if R is None else R
-    pts = [(0.0, 0.0, z) for z in np.linspace(245.0, R, 26)]
-    pts += [(0.0, R - R * math.cos(a), R - R * math.sin(a))
-            for a in np.linspace(0.0, math.pi / 2, 26)[1:]]
-    pts += [(0.0, y, 0.0) for y in np.linspace(R, 245.0, 40)[1:]]
-    return np.array(pts)
-
-# 코스별 중심선 — **원본 좌표(mm)로** 적고, 아래에서 코스 변환을 그대로 먹인다.
-# 손으로 월드 좌표를 다시 쓰면 회전을 두 번 계산하게 되어 어긋난다.
-_ARC_R, _ARC_N = 150.0, 48
-
-
-def _tee_centerline():
-    """스위프 T 중심선 — 본관 +X 에서 와서 R185 원호로 +Z 가지로 오른다.
-
-    블렌드가 +X 쪽 한 곳뿐이라(개구 x −50~+145) 매끄러운 통로는 이 하나다.
-    원호 중심 (+185, 0, +185), 직관 끝 (185,0,0) → 가지 (0,0,185).
+    각 코너에서 앞뒤 직선을 R·tan(θ/2) 만큼 잘라내고 원호로 잇는다.
+    직선 구간은 20mm 간격으로 촘촘히 깐다(이탈 계산이 점열 최근접이라
+    성기면 곡선 구간에서 오차가 생긴다).
     """
-    return np.vstack([
-        np.array([(x, 0.0, 0.0) for x in np.linspace(395, 185, 43)]),
-        np.array([(185 - 185 * math.sin(a), 0.0, 185 - 185 * math.cos(a))
-                  for a in np.linspace(0, math.pi / 2, 30)[1:]]),
-        np.array([(0.0, 0.0, z) for z in np.linspace(185, 790, 61)[1:]])])
+    P = [np.array(c, dtype=np.float64) for c in corners]
+    out = [P[0]]
+    for i in range(1, len(P) - 1):
+        a, b, c = P[i - 1], P[i], P[i + 1]
+        u = a - b
+        v = c - b
+        lu, lv = np.linalg.norm(u), np.linalg.norm(v)
+        if lu < 1e-9 or lv < 1e-9:
+            continue
+        u, v = u / lu, v / lv
+        cosang = float(np.clip(np.dot(u, v), -1.0, 1.0))
+        ang = math.acos(cosang)                  # 두 직선 사이 각
+        if ang > math.pi - 1e-6:                 # 일직선 — 필렛 없음
+            continue
+        t = R / math.tan(ang / 2.0)              # 코너에서 잘라낼 길이
+        t = min(t, 0.49 * lu, 0.49 * lv)
+        p_in, p_out = b + u * t, b + v * t
+        # 직선 (이전 점 → 필렛 시작) — 기점을 먼저 떠 두고 보간한다.
+        # 🚨 `out[-1]` 을 루프 안에서 다시 읽으면 방금 넣은 점이 기점이 되어
+        #    구간이 기하급수로 짧아진다(첫 판의 실수).
+        p0 = out[-1].copy()
+        seg = float(np.linalg.norm(p_in - p0))
+        nstep = max(int(seg / 20.0), 1)
+        for k in range(1, nstep + 1):
+            out.append(p0 + (p_in - p0) * (k / nstep))
+        # 원호 — 중심은 두 접선의 안쪽 이등분선 위
+        w = u + v
+        w = w / max(np.linalg.norm(w), 1e-12)
+        d_c = R / math.sin(ang / 2.0)
+        ctr = b + w * d_c
+        r0, r1 = p_in - ctr, p_out - ctr
+        nrm = np.cross(r0, r1)
+        ln = np.linalg.norm(nrm)
+        if ln < 1e-12:
+            continue
+        nrm = nrm / ln
+        sweep = math.acos(float(np.clip(
+            np.dot(r0, r1) / (np.linalg.norm(r0) * np.linalg.norm(r1)),
+            -1.0, 1.0)))
+        for k in range(1, n + 1):
+            th = sweep * k / n
+            ct, st = math.cos(th), math.sin(th)
+            out.append(ctr + r0 * ct + np.cross(nrm, r0) * st)
+    # 마지막 직선
+    seg = np.linalg.norm(P[-1] - out[-1])
+    nstep = max(int(seg / 20.0), 1)
+    tail = out[-1].copy()
+    for k in range(1, nstep + 1):
+        out.append(tail + (P[-1] - tail) * (k / nstep))
+    return np.array(out)
 
 
-def _tee_cl_out(R=185.0):
-    """**본관 +X → 가지**. 원호 중심 (+R, 0, +R), (R,0,0) → (0,0,R)."""
-    pts = [(x, 0.0, 0.0) for x in np.linspace(395.0, R, 43)]
-    pts += [(R - R * math.sin(a), 0.0, R - R * math.cos(a))
-            for a in np.linspace(0.0, math.pi / 2, 30)[1:]]
-    pts += [(0.0, 0.0, z) for z in np.linspace(R, 790.0, 61)[1:]]
-    return np.array(pts)
+# 🎯 **floor1 = 닫힌 루프.** 임무 = 진입 → T 에서 **오른쪽(−Y) 팔**로 나가
+#    한 바퀴 돌아 **+Y 팔로 T 에 복귀** → 진입 라이저로 나온다.
+#    오른쪽 판정: 진행 +X, 상방 +Z → travel×up = (+X)×(+Z) = −Y. 실측 T
+#    (730,850)에서 −Y 731mm·+Y 531mm 가 열려 있고 정면(+X)은 50mm 벽이다.
+_Z1 = -2740.2
+_F1_CORNERS = [
+    (330.0, 850.0, -2405.2),       # 거름망 아래 (라이저 상단)
+    (330.0, 850.0, _Z1),           # 라이저 → 수평망
+    (730.0, 850.0, _Z1),           # ★T 분기★
+    (730.0, 100.0, _Z1),           # 오른팔(−Y)로 나감
+    (1300.0, 100.0, _Z1),          # 루프 아래변 → +X
+    (1300.0, 1400.0, _Z1),         # 우변 +Y (합류부 1300,750 통과)
+    (730.0, 1400.0, _Z1),          # 위변 −X
+    (730.0, 850.0, _Z1),           # ★T 로 복귀★ (한 바퀴 닫힘)
+]
+_Z2 = -250.0
+_F2_CORNERS = [
+    (330.0, 850.0, 85.0),
+    (330.0, 850.0, _Z2),
+    (680.0, 850.0, _Z2),
+    (680.0, 1400.0, _Z2),
+    (1200.0, 1400.0, _Z2),
+    (1200.0, 600.0, _Z2),
+    (1500.0, 600.0, _Z2),
+]
 
-
-def _tee_cl_in(R=185.0):
-    """**가지 → 본관 −X**. 원호 중심 (−R, 0, +R), (0,0,R) → (−R,0,0).
-
-    🔑 `_tee_cl_out` 과 **반대쪽 모서리**다. 사용자 맵의 오른손 법칙 루프가
-       한 분기에서 쓰는 두 모서리가 바로 이 둘이다 — 나갈 때 한쪽, 한 바퀴
-       돌아 돌아올 때 반대쪽. **그래서 양쪽 다 R185 블렌드가 있어야 한다.**
-       한쪽만 블렌드한 판(`_oneside`)은 이 경로가 직각이 되어 성립하지 않는다.
-    """
-    pts = [(0.0, 0.0, z) for z in np.linspace(790.0, R, 61)]
-    pts += [(-R + R * math.cos(a), 0.0, R - R * math.sin(a))
-            for a in np.linspace(0.0, math.pi / 2, 30)[1:]]
-    pts += [(x, 0.0, 0.0) for x in np.linspace(-R, -395.0, 30)[1:]]
-    return np.array(pts)
-
-
-def _elbow_centerline():
-    pts = [(0.0, y, 0.0) for y in np.linspace(350.0, 150.0, 41)]
-    # 원호 중심 (y, z) = (150, 150). 진행이 −Y 이고 +Z 로 꺾이므로
-    #   P(t) = 중심 + R·(0, −sin t, −cos t)   t: 0 → π/2
-    #   t=0  → (0, 150,   0)  직관 끝
-    #   t=π/2→ (0,   0, 150)  수직관 시작
-    cy, cz = 150.0, 150.0
-    for t in np.linspace(0.0, math.pi / 2, _ARC_N)[1:]:
-        pts.append((0.0, cy - _ARC_R * math.sin(t),
-                    cz - _ARC_R * math.cos(t)))
-    pts += [(0.0, 0.0, z) for z in np.linspace(150.0, 250.0, 21)[1:]]
-    return np.array(pts)
-
-
+# 코스 변환 — mm→m 스케일 + 활성 층 수평망을 월드 z=0 으로 올린다.
+# 🚨 건물이 z −2980~+2100mm 라 z=0 이 한가운데를 자른다. 수평망을 원점에
+#    맞춰야 좌표가 ±2m 안에 들어오고 지면과도 안 겹친다(real_map_demo 규약).
 COURSES = {
-    # 이름:      (USD, 코스 변환(원본 mm → 월드 m), 중심선(원본 mm), 설명)
-    "elbow_v": (_ELBOW, scale(MM) * rot(90, (0, 0, 1)) * trans(0.0, 0.0, 0.0),
-                _elbow_centerline(), "수직 곡관 — 직관 200mm 뒤 위로 꺾인다"),
-    # 🚨 y=0.9 였을 때 **출구 다리(월드 x≈0, y 0.65~0.75)가 reducer 관축
-    #    (y=0.7, x −1.25~+1.3)을 관통**해 reducer 로봇이 x=+70mm(s=670)에서
-    #    막혔다(2026-08-07 GUI 실측, 사용자 발견). ALL 4대 공존을 위해 y=2.0.
-    "elbow_h": (_ELBOW,
-                scale(MM) * rot(90, (0, 0, 1)) * rot(90, (1, 0, 0))
-                * trans(0.0, 2.0, 0.0),
-                _elbow_centerline(), "수평 곡관 — 같은 관을 진행축으로 90° 굴렸다"),
-    # 🔑 **관경 변화 시험편** DN100→150→100 (STEP 수령 → 변환).
-    #    관 축이 이미 +X 라 회전은 필요 없다. 다른 코스와 안 겹치게 y=+3.2.
-    # 가지 진입 경로: 본관 −X 에서 와서 R185 원호로 꺾여 +Z 로 오른다.
-    #   원호 중심 (−185, 0, 185) → 직관 끝 (−185,0,0) 에서 (0,0,185) 로 잇는다
-    "tee_s": (_TEES, scale(MM) * trans(0.0, -1.5, 0.0),
-              np.vstack([
-                  np.array([(x, 0.0, 0.0) for x in np.linspace(-400, -185, 44)]),
-                  np.array([(-185 + 185 * math.sin(a), 0.0,
-                             185 - 185 * math.cos(a))
-                            for a in np.linspace(0, math.pi / 2, 30)[1:]]),
-                  np.array([(0.0, 0.0, z) for z in np.linspace(185, 790, 61)[1:]])]),
-              "스위프 T R185 — 본관에서 가지로 90° 진입"),
-    # 한쪽 스위프 T — 블렌드가 +X 쪽이라 **+X 에서 와서 −X 로 가다** 가지로
-    # 올라간다. 원호 중심 (+185,0,+185) → 직관 끝 (+185,0,0) 에서 (0,0,185) 로.
-    # 🚨 다른 관과 겹치면 그 겹침 때문에 발산한다(기록된 사고) → y=−3.0 에 홀로.
-    # 🚨 **T 는 눕힌다** (2026-08-07 사용자 지시 재확인 — *"얘는 수직으로 있을
-    #    일이 없어"*). CAD 원본은 가지가 +Z 로 서 있는데, `Rx(90°)` 이 본관
-    #    진행축(월드 X)은 그대로 두고 가지만 −Y 로 눕힌다. 곡관 `elbow_h` 와
-    #    같은 수법이고, 중심선에도 같은 변환이 그대로 먹는다(`xf_pts`).
-    # 🎯 **사용자 맵의 루프가 실제로 쓰는 두 모서리** (2026-08-07 정정).
-    #    오른손 법칙 루프는 한 분기에서 **나갈 때 한쪽 / 돌아올 때 반대쪽**
-    #    모서리를 쓴다. 그래서 **양쪽 다 R185 블렌드가 있어야** 하고,
-    #    양방향 판(`tee_sweep.usd`)이 그 물건이다.
-    #    🚨 내가 CAD 에 낸 "블렌드는 한쪽만" 요청은 **틀렸다** — 한쪽만 남기면
-    #       복귀 모서리가 직각(곡률 0)이 되어 성립하지 않는다.
-    #    🚨 **T 는 눕힌다**(*"얘는 수직으로 있을 일이 없어"*). `Rx(90°)` 이 본관
-    #       진행축(월드 X)은 그대로 두고 가지만 −Y 로 눕힌다.
-    "tee_out": (_TEES, scale(MM) * rot(90, (1, 0, 0)) * trans(0.0, 0.0, 0.0),
-                _tee_cl_out(),
-                "양방향 스위프 T R185(수평) — **본관 +X → 가지** (나가는 쪽)"),
-    "tee_in": (_TEES, scale(MM) * rot(90, (1, 0, 0)) * trans(0.0, -1.1, 0.0),
-               _tee_cl_in(),
-               "양방향 스위프 T R185(수평) — **가지 → 본관 −X** (돌아오는 쪽)"),
-    # 🎯 **각진 T** — 본관을 X 로 돌리고(Rz −90) 가지를 눕힌다(Rx 90).
-    #    원본은 본관이 Y, 가지가 +Z 라 스위프 판과 축 규약이 다르다.
-    # 🎯 **사용자 규약 (2026-08-07 확정): T 의 세로 획(stem)이 본관이다.**
-    #    임무 루프 = 본관→오른팔로 나가고, 밖에서 한 바퀴 돈 뒤 **왼팔에서
-    #    오른쪽으로 꺾어 본관으로 전진 복귀**한다. 둘 다 오른손 법칙 하나로
-    #    풀린다(오른쪽 개구 → 진입, 왼쪽 개구 → 직진). 후진 recall 은 임무
-    #    위상이 아니다 — 연습장 반복용일 뿐.
-    #    🚨 이전 이름(tee_a_out/in)은 CAD 가로대를 본관으로 놓아 **의미가
-    #    뒤집혀 있었다**(사용자가 세 번 지적). 기하·검증은 그대로 유효하다.
-    "tee_go": (_TEEA,
-               scale(MM) * rot(-90, (0, 0, 1)) * rot(90, (1, 0, 0))
-               * trans(0.0, 0.0, 0.0),
-               _tee_ang_in(),
-               "각진 T(수평) — **본관(stem) → 오른팔** (나감, 오른손 법칙)"),
-    "tee_back": (_TEEA,
-                 scale(MM) * rot(-90, (0, 0, 1)) * rot(90, (1, 0, 0))
-                 * trans(0.0, -1.1, 0.0),
-                 _tee_ang_out(),
-                 "각진 T(수평) — **왼팔 → 본관(stem)** (복귀, 오른손 법칙)"),
-    # ── 아래는 비교용 (스위프 판). `all` 에는 안 들어간다 ──────────
-    "tee_s1": (_TEES1, scale(MM) * rot(90, (1, 0, 0)) * trans(0.0, -3.0, 0.0),
-               _tee_centerline(),
-               "한쪽 스위프 T R185(수평) — 본관 → 가지 (블렌드된 모서리)"),
-    "tee_s1_rev": (_TEES1,
-                   scale(MM) * rot(90, (1, 0, 0)) * trans(0.0, -6.0, 0.0),
-                   _tee_centerline()[::-1],
-                   "한쪽 스위프 T — 같은 모서리를 거꾸로 (루프와는 다른 경로)"),
-    "tee_s2": (_TEES2, scale(MM) * rot(90, (1, 0, 0)) * trans(0.0, -9.0, 0.0),
-               _tee_centerline(),
-               "한쪽 스위프 T '_narrow' — 개구 145°"),
-    "reducer": (_RED, scale(MM) * trans(-0.65, 0.7, 0.0),
-                np.array([(x, 0.0, 0.0)
-                          for x in np.linspace(-600.0, 1300.0, 191)]),
-                "관경 변화 DN100→150→100 — 테이퍼 반각 4.76°"),
+    "floor1": (_MAP, scale(MM) * trans(0.0, 0.0, -_Z1 * MM),
+               _fillet(_F1_CORNERS),
+               "화장실 floor1 — **닫힌 루프**. T 에서 오른팔로 나가 한 바퀴"),
+    "floor2": (_MAP, scale(MM) * trans(0.0, 0.0, -_Z2 * MM),
+               _fillet(_F2_CORNERS),
+               "화장실 floor2 — 막다른 끝(단절)까지 2.5m"),
 }
-# 🎯 **`all` = 관 5개 · 로봇 5기** (2026-08-07 사용자 지시). 배관은 4종인데
-#    **T 만 정방향·역방향 두 대**로 나눠 각자 왕복시킨다 — 관을 따로 깔고
-#    중심선만 뒤집는다.
-#    `tee_s`(양방향 블렌드 판)는 제외 — 개구 213° 라 본관→가지에서 지금도
-#    끼임 4회로 실패한다. 비교용 정의는 남겨 `--course tee_s` 로 부를 수 있다.
-#    `tee_s2`(`_narrow` 판, 145°)도 통과하지만 대표는 `tee_s1` 하나로 둔다.
-# 🎯 2026-08-07 사용자 지시 — 곡관 2종은 확인이 끝났으니 빼고 **3개만**,
-#    그리고 **서로 붙여 놓는다**(전에는 y 로 3~6m 씩 떨어져 있어 한 화면에
-#    안 들어왔고, 가지→본관 코스를 아예 못 찾았다).
-# 🎯 2026-08-07 사용자 지시: "GUI 로 4개 다" — elbow_h 를 다시 넣는다
-#    (센터링 조향·곡관 판별자 검증 이후). 배치 y=+0.9 라 기존 셋과 안 겹친다.
-ALL_NAMES = ["tee_go", "tee_back", "reducer", "elbow_h"]
-# 🎯 쉼표 목록 지원 (2026-08-07 사용자: 렌더 부하 때문에 단계별로 확인 —
-#    "T 2개 먼저, 곡관 2개, 마지막 reducer"). `--course tee_go,tee_back`.
+# 🚨 **한 번에 한 층만 띄운다.** 같은 맵 파일을 두 번 참조하면 건물 셸이
+#    두 겹으로 겹쳐 콜라이더가 서로 관통한다(기록된 발산 사고와 같은 부류).
+ALL_NAMES = ["floor1"]
 RUN_NAMES = list(ALL_NAMES) if COURSE == "all" else COURSE.split(",")
 for _nm in ([] if COURSE == "all" else RUN_NAMES):
     if _nm not in COURSES:
         raise SystemExit(f"[중단] --course 는 all 또는 {list(COURSES)} 의 "
                          f"쉼표 목록이어야 한다 (받은 값: {_nm!r})")
-for _nm, (_usd, _x, _c, _d) in COURSES.items():
-    if not _usd.is_file():
-        raise SystemExit(
-            f"[중단] 배관 USD 가 없다: {_usd}\n"
-            f"        isaac_python tools/step_to_usd.py "
-            f"~/Downloads/{_usd.stem}.stp 로 먼저 구울 것")
+if len(RUN_NAMES) > 1:
+    raise SystemExit("[중단] 실전 맵은 **한 번에 한 층만** 띄운다 — 같은 맵을 "
+                     "두 번 참조하면 건물 셸이 겹쳐 콜라이더가 관통한다. "
+                     "`--course floor1` 또는 `--course floor2`")
+if not _MAP.is_file():
+    raise SystemExit(
+        f"[중단] 맵 USD 가 없다: {_MAP}\n"
+        f"        isaac_python tools/step_to_usd.py "
+        f"~/Downloads/{_MAP.stem}.stp 로 먼저 구울 것")
 
 
 def xf_pts(mat, pts_mm):
@@ -775,7 +657,17 @@ def xf_pts(mat, pts_mm):
 
 
 class Centerline:
-    """코스 중심선 — 진행거리 s 와 중심선까지의 거리를 준다."""
+    """코스 중심선 — 진행거리 s 와 중심선까지의 거리를 준다.
+
+    🚨 **닫힌 루프에서는 전역 최근접이 성립하지 않는다** (2026-08-08 실전 맵
+       실측). floor1 은 T 에서 나가 한 바퀴 돌아 **같은 T 로 돌아오는** 루프라
+       중심선의 끝점과 초반 접근 구간이 같은 자리에 있다. 전역 argmin 은
+       T 근처의 로봇을 **끝점(s=4088)** 에 붙여 버렸고, 데모는 그것을 "코스 끝
+       도달" 로 읽어 출발 직후 복귀 지시를 내렸다(실측: s 599 → 4088 점프).
+    → **창(window) 안에서만 찾는다.** 직전 s 를 힌트로 받아 ±`win` 안의
+      구간만 본다. 로봇은 한 스텝에 1mm 도 못 가므로 창을 벗어날 수 없고,
+      그래서 루프가 닫혀 있어도 s 가 단조롭게 이어진다.
+    """
 
     def __init__(self, pts):
         self.p = pts
@@ -783,8 +675,15 @@ class Centerline:
         self.s = np.concatenate([[0.0], np.cumsum(d)])
         self.total = float(self.s[-1])
 
-    def nearest(self, q):
-        i = int(np.argmin(np.linalg.norm(self.p - q, axis=1)))
+    def nearest(self, q, hint=None, win=0.35):
+        if hint is None:
+            i = int(np.argmin(np.linalg.norm(self.p - q, axis=1)))
+        else:
+            lo = int(np.searchsorted(self.s, hint - win))
+            hi = int(np.searchsorted(self.s, hint + win))
+            lo, hi = max(lo, 0), min(max(hi, lo + 2), len(self.p))
+            i = lo + int(np.argmin(
+                np.linalg.norm(self.p[lo:hi] - q, axis=1)))
         return float(self.s[i]), float(np.linalg.norm(self.p[i] - q)), i
 
     def tangent(self, i):
@@ -837,9 +736,20 @@ for name in RUN_NAMES:
               if p.IsA(UsdGeom.Mesh) and str(p.GetPath()).startswith(root_path)]
     n_col = n_skip = 0
     for p in meshes:
+        # 🚨 **활성 층만 콜라이더를 준다** (실전 맵). 한 파일에 두 층 + 복도
+        #    샤프트가 다 들어 있어 전부 주면 삼각형이 5만을 넘고, 무엇보다
+        #    다른 층 관을 잘못 잡을 위험이 있다(real_map_demo 규약).
+        #    렌더는 남긴다 — GUI 에서 건물 맥락이 보이는 편이 낫다.
+        if f"/{name}/" not in str(p.GetPath()):
+            n_skip += 1
+            continue
         # 🚨 `Sweep` 은 관 **속살(내면)만** 따로 들어 있는 면체(surface body)라
         #    PartBody 의 내면과 완전히 겹친다. 둘 다 콜라이더로 주면 같은 자리에
-        #    접촉이 두 번 생기고, 렌더도 z-fighting 이 난다 → 표시·충돌 둘 다 뺀다.
+        #    접촉이 두 번 생기고, 렌더도 z-fighting 이 난다.
+        # 🔑 **실측(2026-08-08): 새 맵은 Sweep 이 PartBody 보다 0.8mm 넓다**
+        #    (49.9 vs 49.1). 좁은 쪽이 실효 벽이므로 PartBody 만 콜라이더로
+        #    줘도 결과가 같고 삼각형이 준다. 구 맵의 4.7mm 차이(fix_map.py 가
+        #    고치던 결함)는 이 맵에 **없다** — 보정 도구가 필요 없다.
         if "Sweep" in str(p.GetPath()):
             UsdGeom.Imageable(p).MakeInvisible()
             n_skip += 1
@@ -856,31 +766,12 @@ for name in RUN_NAMES:
             UsdShade.MaterialBindingAPI.Apply(p).Bind(
                 _gl, bindingStrength=UsdShade.Tokens.strongerThanDescendants)
         n_col += 1
-    if name == "reducer":
-        _rt = xform.ExtractTranslation()
-        # 🚨 입구 DN100 구간이 200mm 뿐인데 로봇은 170mm 다. 안착 중 74mm 뒤로
-        #    밀리면 뒤가 관 밖으로 나가 발산한다 → **legacy 직관 600mm 를
-        #    입구에 맞대 붙인다.** 🚨 코스 루트 아래에 넣으면 안 된다(루트에
-        #    scale 0.001 이 걸려 있는데 make_mesh 는 이미 미터다) → 월드에 직접.
-        _ep = make_mesh("/World/Pipe_reducer_ext",
-                        SON / "legacy" / "meshes" / "pipe_straight.stl",
-                        color=(0.55, 0.58, 0.60),
-                        # 🚨 y 를 하드코딩하지 말 것 — 코스를 옮기면 연장관만
-                        #    제자리에 남아 입구가 끊긴다. 코스 변환에서 끌어온다.
-                        xform=trans(_rt[0] - 0.30, _rt[1],
-                                    _rt[2])).GetPrim()
-        UsdPhysics.CollisionAPI.Apply(_ep)
-        UsdPhysics.MeshCollisionAPI.Apply(_ep).CreateApproximationAttr("none")
-        UsdGeom.Mesh(_ep).CreateDoubleSidedAttr(True)
-        UsdShade.MaterialBindingAPI.Apply(_ep).Bind(
-            UsdShade.Material.Get(stage, "/World/PipePhysMat"),
-            bindingStrength=UsdShade.Tokens.weakerThanDescendants,
-            materialPurpose="physics")
-        if GLASS:
-            UsdShade.MaterialBindingAPI.Apply(_ep).Bind(
-                _gl, bindingStrength=UsdShade.Tokens.strongerThanDescendants)
-        print("  reducer 입구 연장 — legacy 직관 600mm (월드 x −1.25~−0.65m)")
-
+    # 🔑 **맵은 손대지 않는다.** 구 real_map_demo 는 맵을 고쳐 쓰는 코드가
+    #    셋 있었다 — ① `tools/fix_map.py`(좁은 중복 사본을 참 반경으로 투영,
+    #    ø90 가지 확장) ② `refine_near()`(결함 주변 메시 세분) ③ 결함 관통
+    #    개구 절단. 셋 다 **구 맵의 결함과 수리 시연을 위한 것**이고, 실측
+    #    결과 새 맵에는 그 결함이 없다(내반경 49.0~49.4 균일·R150 확인,
+    #    구 ø90 자리 49.3). 이 데모는 원본 형상을 그대로 굴린다.
     if REVERSE and name == COURSE:
         cl_mm = cl_mm[::-1]          # 반대 방향 통과 시험
     cl = Centerline(xf_pts(xform, cl_mm))
@@ -928,14 +819,38 @@ CAM_SPECS = [
 # 출발점 — 입구에서 안쪽으로 120mm. 🚨 안착 중에 로봇이 뒤로 밀린다(피스톤
 # 6개가 동시에 벽을 밀며 자세를 잡는 과도 구간, 토치를 달면 74mm). 입구에
 # 너무 붙여 세우면 밀린 뒤 후방 휠이 관 밖 자유공간에 떠서 못 나간다.
-START_S = float(os.environ.get("START_S", 0.120))
-# 🔑 리듀서만 다르다 — 입구 DN100 이 200mm 뿐이라 **연장관 안쪽**에서 출발한다.
-START_S_RED = float(os.environ.get("START_S_RED", 0.30))
+# 🚨 **실전 맵 floor1 의 진입부는 로봇보다 짧다** (2026-08-08 실측 — 이 코스의
+#    가장 중요한 제약이다. 구간을 실제로 재 보고 알았다):
+#        라이저 직선   s   0 ~ 185mm   (거름망 아래 수직)
+#        진입 곡관R150 s 185 ~ 421mm
+#        곡관→T 직선   s 421 ~ **521mm**  ← 100mm 뿐이다
+#        T 분기 원호   s 521mm ~
+#    **로봇 전장 188mm 는 어느 직선 구간에도 통째로 안 들어간다**(라이저 185,
+#    진입 직선 100). 구 데모의 벨로우즈는 140mm 라 라이저에 들어갔다.
+# 🚨 첫 판의 0.46 은 **s=520 = T 원호 시작점 그 자리**였다 — 로봇이 접근할
+#    거리 없이 분기 한복판에서 깨어나 판정이 요동쳤다(관경 74mm·이탈 48mm).
+# 🚨 **배치 코드는 로봇을 직선으로 눕힌다** — 곡관에 걸친 s 를 주면 뒤쪽
+#    절반이 관 벽을 파고든 채 시작한다. 0.42 로 두었더니 뒤끝이 진입 곡관
+#    원호 한복판(x=324)에 박혀 뜬다리 7개·요동으로 못 나갔다(실측).
+#    연습장 코스는 전부 직선에서 출발해 이 함정이 안 드러났다.
+# 🔑 **온전히 직선에 들어가는 창을 계산해서 그 가운데를 쓴다** (실측):
+#        진입 직선   x 480(곡관 끝) ~ 682(T 개구 시작) = **202mm**
+#        로봇        188mm (앞끝 = 전방바디+32, 뒤끝 = 전방바디−156)
+#        가능한 전방바디 x 636~650 → **START_S 0.577 ~ 0.591 (여유 14mm)**
+#    ⚠ 여유가 14mm 뿐이다 — 이 맵의 진입부는 이 로봇에게 원리적으로 빠듯하다
+#      (연습장 T 는 접근 직선이 245mm 였다). CAD 여유를 늘릴 수 있다면
+#      진입 곡관과 T 사이를 300mm 이상으로 하는 것이 실물에서도 안전하다.
+START_S = float(os.environ.get("START_S", 0.585))
 # 코스 **끝**에서도 여유를 둔다 — 안 그러면 로봇이 관 끝 밖으로 나간다.
 # 🎯 0.16 → 0.10 (2026-08-07 사용자: *"양끝을 좀 더 이동하게"*). 관을 늘리지
 #    않고 기존 관의 반환점을 끝쪽으로 60mm 당겼다. s 는 전방 세그먼트 기준
 #    이라 0.10 이면 전방 휠이 관 끝 ~55mm 안쪽에서 돌아선다(사출 여유 유지).
 END_S = float(os.environ.get("END_S", 0.10))
+# 🎯 **임무 종점 = 배수구 밖** (2026-08-08 사용자 확정). 중심선 s 가 이 값
+#    아래로 내려오면 진입 라이저를 빠져나온 것으로 보고 임무를 끝낸다.
+#    (s 는 채점 정보다 — 주행 판단이 아니라 **언제 끝났는지**를 정하는 데만
+#     쓴다. 코스 끝 판정(`recall`)이 이미 같은 규약이다.)
+EXIT_S = float(os.environ.get("EXIT_S", 0.02))
 
 robots = []
 
@@ -1161,7 +1076,7 @@ def build_robot(name, path_cl):
     if _nh:
         print(f"  {name}: 실린더·원뿔 콜라이더 {_nh}개 → convexHull 메시로 교체")
 
-    _s0 = START_S_RED if name == "reducer" else START_S
+    _s0 = START_S
     i0 = int(np.argmin(np.abs(path_cl.s - _s0)))
     p0 = path_cl.p[i0]
     tan = path_cl.tangent(i0)
@@ -1174,7 +1089,10 @@ def build_robot(name, path_cl):
     _rear, _front = seg_body_prims(root, jd)
     _fw = np.array(
         wlocal(_front) - wlocal(_rear), dtype=np.float64)
-    _fw = _fw / max(np.linalg.norm(_fw), 1e-12)
+    # 🔑 두 세그먼트 중심 사이 거리 = 굽힘이 걸리는 **호의 길이**. 차동 속도의
+    #    곡률 반경 R = 이 길이 / 총 굽힘각 계산에 쓴다(로봇 제원, 도면 무관).
+    _seg_span = float(np.linalg.norm(_fw))
+    _fw = _fw / max(_seg_span, 1e-12)
     _to_x = Gf.Matrix4d(1.0)
     _to_x.SetRotate(Gf.Rotation(Gf.Vec3d(*[float(v) for v in _fw]),
                                 Gf.Vec3d(1, 0, 0)))
@@ -1242,6 +1160,9 @@ def build_robot(name, path_cl):
     return {"name": name, "path": rp, "jd": jd, "fw": _fw,
             "cl": path_cl, "i0": i0,
             "state": "SETTLE", "t": 0, "dir": +1, "lap": 0, "stuck": 0,
+            # 🔑 창 기반 s 추적의 씨앗 — 출발 지점을 알고 시작한다(닫힌 루프).
+            "s_hint": float(path_cl.s[i0]),
+            "seg_span": _seg_span,
             "s_last": 0.0, "mark": 0, "dead": False, "art": None,
             "wheel": [], "seg1": None, "best": 0.0, "wheel_rad": 0.0}
 
@@ -1366,6 +1287,25 @@ for r in robots:
             if _base(n2, _ln) == _nm and "TRANSLATION" in types[k2]:
                 r["leg_clock"][k2] = math.degrees(
                     math.atan2(float(_p0[2]), float(_p0[1]))) % 360.0
+    # 🎯 **바퀴별 시계각** (2026-08-08 사용자 지시 — 차동 속도용). 바퀴는
+    #    다리 끝에 달리므로 **같은 이름의 다리**에서 시계각을 물려받는다
+    #    (구동 조인트와 서스펜션이 이름을 공유하는 이 자산 구조가 근거).
+    #    이것이 있어야 "굽힘 바깥쪽 바퀴는 더 멀리 간다"를 계산할 수 있다.
+    _clk_by_name = {}
+    for _j in jd["legs"]:
+        _p0 = _j.GetAttribute("physics:localPos0").Get()
+        _clk_by_name[_j.GetName()] = math.degrees(
+            math.atan2(float(_p0[2]), float(_p0[1]))) % 360.0
+    r["wheel_clock"] = {}
+    for _k in r["wheel"]:
+        _b = _base(dof[_k], _wn)
+        if _b in _clk_by_name:
+            r["wheel_clock"][_k] = _clk_by_name[_b]
+    if len(r["wheel_clock"]) != len(r["wheel"]):
+        print(f"[경고] {r['name']}: 바퀴 시계각 "
+              f"{len(r['wheel_clock'])}/{len(r['wheel'])} 만 매핑 — "
+              f"차동 속도를 끈다")
+
     # 조향용 — 중앙 관절의 피치/요 DOF 를 갈라 둔다 (D6 는 `J0:1`·`J0:2`)
     _ax = TUNE.get("steer")
     if _ax and STEER_ON:
@@ -1458,6 +1398,11 @@ try:
                 except Exception as exc:
                     print(f"[경고] {r['name']} depth 어노테이터 실패({exc})")
                 r["cam_front"] = cam
+                # 🔑 카메라 프림을 들고 있는다 — 매 스텝 **실제 월드 자세**로
+                #    "월드 오른쪽이 화면 몇 도인가"를 재기 위해서다(오른손
+                #    법칙을 중력 기준으로 못박는다).
+                r["cam_prim"] = stage.GetPrimAtPath(
+                    f"{r['path']}/{seg}/{nm}_rig/{nm}")
             cam.set_clipping_range(0.005, 5.0)
             cam.set_focal_length(3.0 * F_PX * 1e-6)
             cam.set_horizontal_aperture(3.0 * CAM_W * 1e-6)
@@ -1710,8 +1655,8 @@ def diag_stuck(r):
     cl = r["cl"]
     q = np.asarray(r["art"].get_joint_positions())
     p0, p1 = wpos(r["seg0"]), wpos(r["seg1"])
-    s0, o0, _ = cl.nearest(p0)
-    s1, o1, _ = cl.nearest(p1)
+    s0, o0, _ = cl.nearest(p0, r.get("s_hint"))
+    s1, o1, _ = cl.nearest(p1, r.get("s_hint"))
     print(f"           [진단] 뒤 s={s0 * 1000:.0f} 이탈{o0 * 1000:5.1f} "
           f"월드({p0[0] * 1000:+.0f},{p0[1] * 1000:+.0f},{p0[2] * 1000:+.0f}) | "
           f"앞 s={s1 * 1000:.0f} 이탈{o1 * 1000:5.1f} "
@@ -1726,7 +1671,7 @@ def diag_stuck(r):
               f"{PISTON_STROKE * 1000:.0f}) [{ext}]")
     rad = []
     for wp in r["wheel_prims"]:
-        _s, _o, _ = cl.nearest(wpos(wp))
+        _s, _o, _ = cl.nearest(wpos(wp), r.get("s_hint"))
         rad.append(_o * 1000)
     print(f"           [진단] 휠 중심선 거리(mm, 관벽 "
           f"{(PIPE_IR - WHEEL_R) * 1000:.0f}) "
@@ -1872,7 +1817,7 @@ def steer(r, i_now):
     #    맞추는 것이지 진행 방향을 쫓는 것이 아니다.
     p0, p1 = wpos(r["seg0"]), wpos(r["seg1"])
     span = p1 - p0
-    s1, _o1, i1 = cl.nearest(p1)
+    s1, _o1, i1 = cl.nearest(p1, r.get("s_hint"))
     j = int(np.argmin(np.abs(cl.s - (s1 + STEER_LOOK * r["dir"]))))
     d = cl.tangent(j)
     if float(np.dot(d, span)) < 0.0:          # 접선 부호를 몸통 방향에 맞춘다
@@ -1983,7 +1928,61 @@ def drive(r, deg_s):
         deg_s *= r["gov"]
     elif GOV_ON:
         r["gov"], r["gov_dir"] = 1.0, None
-    v = np.array([math.radians(deg_s)] * len(r["wheel"]), dtype=np.float32)
+    # 🎯 **바퀴 차동 속도** (2026-08-08 사용자 지시 — *"앞대가리에만 영향을
+    #    주니 관절마다, 꼬리쪽은 더 심하게 비틀린다"*). 지금까지 12개 바퀴에
+    #    **똑같은 각속도**를 줬는데, 굽은 관에서는 바깥쪽 바퀴가 더 먼 거리를
+    #    가야 한다 — 같은 속도를 주면 바깥은 끌리고 안쪽은 밀려 그 마찰이
+    #    몸통을 비트는 토크가 된다(명령이 나오는 앞에서 먼 꼬리가 가장 심함).
+    # 🔑 로봇 자기 신호만 쓴다(도면 무관): 중앙 관절 엔코더 → 총 굽힘각 θ 와
+    #    굽힘 방위, 세그먼트 간격 L → 곡률 반경 **R = L/θ**. 바퀴가 시계각 φ
+    #    (자산 제원)에 반경 r_w 로 달려 있으면 그 바퀴의 선회 반경은
+    #    R − r_w·cos(φ − φ_bend) 이므로
+    #        속도배율 = 1 − (r_w/R)·cos(φ − φ_bend)
+    #    굽힘 안쪽(φ = φ_bend)은 느리고 바깥쪽은 빠르다.
+    # 🚨 배율은 [0.5, 1.5] 로 자른다 — θ 가 크면 R 이 작아져 발산한다.
+    _mult = None
+    if DIFF_ON and r.get("wheel_clock") and len(r["wheel_clock"]) == len(r["wheel"]) \
+            and r.get("bel_pitch") and r.get("seg_span", 0) > 1e-6:
+        _q = np.asarray(r["art"].get_joint_positions())
+        _tp = float(np.sum(_q[r["bel_pitch"]]))
+        _ty = float(np.sum(_q[r["bel_yaw"]]))
+        _th = math.hypot(_tp, _ty)
+        if _th > math.radians(3.0):          # 3° 밑은 직관 — 차동 불필요
+            # 🚨 **곡률 반경에 바닥을 둔다** (2026-08-08 실측 교훈). 진입
+            #    기동 중에는 관절이 60° 넘게 꺾여 R = L/θ 가 74mm 까지 작아지고
+            #    (실제 관은 R150) 배율이 ±0.57 로 벌어졌다. 설계 최소 곡관
+            #    반경(SR R=100mm, v3 §4.2)을 바닥으로 쓴다 — 맵 정보가 아니라
+            #    **배관 설계 규격**이라 자율 원칙에 어긋나지 않는다.
+            _R = max(r["seg_span"] / _th, 0.10)
+            # 굽힘 방위 — 조향 규약(tp ∝ −sinθ, ty ∝ +cosθ)의 역
+            _bc = math.degrees(math.atan2(-_tp, _ty))
+            _c = r.get("cond")
+            _bore = (float(_c.bore_ref_mm) / 1000.0
+                     if _c is not None and getattr(_c, "bore_ref_mm", 0) > 0
+                     else PIPE_IR)
+            _rw = max(_bore - WHEEL_R, 0.005)   # 휠 중심이 도는 반경
+            # 🔑 **아무 바퀴도 기준 속도보다 느리게 주지 않는다** (핵심 수정).
+            #    속도 드라이브는 지령보다 빨리 도는 바퀴를 **잡아채므로**,
+            #    안쪽 바퀴에 0.5배를 주면 그것이 곧 브레이크가 된다 — 실측
+            #    실패가 정확히 그 모습이었다(이탈 1.4mm 로 잘 정렬된 채
+            #    **전진만 못 함**, floor2 s 969→355).
+            #    → 비율은 유지하되 **최솟값이 1.0 이 되도록 통째로 올린다.**
+            #      안쪽 바퀴는 그대로, 바깥 바퀴만 더 빨리 돈다. 전체가 조금
+            #      빨라지는 것은 기존 실측 되먹임(gov)이 알아서 되돌린다.
+            _raw = []
+            for _k in r["wheel"]:
+                _phi = r["wheel_clock"][_k]
+                _raw.append(1.0 - DIFF_SIGN * DIFF_GAIN * (_rw / _R)
+                            * math.cos(math.radians(_phi - _bc)))
+            _lo = max(min(_raw), 0.3)
+            _mult = [float(np.clip(x / _lo, 1.0, 1.8)) for x in _raw]
+            r["diff_spread"] = max(_mult) - min(_mult)
+            r["diff_max"] = max(r.get("diff_max", 0.0), r["diff_spread"])
+    if _mult is None:
+        r["diff_spread"] = 0.0
+        v = np.array([math.radians(deg_s)] * len(r["wheel"]), dtype=np.float32)
+    else:
+        v = np.array([math.radians(deg_s) * m for m in _mult], dtype=np.float32)
     i = np.array(r["wheel"])
     try:
         a._articulation_view.set_joint_velocity_targets(v.reshape(1, -1),
@@ -2065,7 +2064,10 @@ while True:
             continue
         r["t"] += 1
         p1 = wpos(r["seg1"])
-        s_now, off_now, i_now = r["cl"].nearest(p1)
+        # 🚨 닫힌 루프 — 직전 s 를 힌트로 창 안에서만 찾는다(전역 argmin 은
+        #    T 근처에서 끝점에 붙어 "코스 끝" 오판을 낸다, 실측).
+        s_now, off_now, i_now = r["cl"].nearest(p1, r.get("s_hint"))
+        r["s_hint"] = s_now
 
         if r["state"] == "SETTLE":
             # 🚨 안착 중에도 예압을 **매 스텝 다시 써야** 한다 — reset 뒤의
@@ -2172,6 +2174,50 @@ while True:
             _hold_start = r.get("straighten_n", 0) > 0
             if _hold_start:
                 r["straighten_n"] -= 1
+            # 🎯 **중력 기준 절대 롤로 "오른쪽"을 잡는다** (2026-08-08, 실전
+            #    맵에서 드러난 결함). 오른손 법칙의 오른쪽은 **월드** 기준
+            #    (진행방향 × 중력반대)인데, 컨트롤러는 개구 방위를 **몸**
+            #    프레임 clock 으로 판정한다. 연습장은 전 코스가 수평 진입이라
+            #    둘이 같았지만, 실전 맵은 **수직 라이저 → 곡관 → 수평**으로
+            #    들어오면서 로봇이 축을 중심으로 굴러(롤) 몸 기준 오른쪽이
+            #    월드 왼쪽이 된다. 실측: T 에서 개구가 몸 clock 355°(왼쪽으로
+            #    판정)로 보여 진입 거부 → 정체 사망.
+            # 🔑 설계 문서가 이미 답을 준다 — *"롤: IMU 중력 기준 **절대 롤**"*.
+            #    도면이 아니라 **센서**로 푸는 것이라 자율 원칙에 어긋나지
+            #    않는다. 매 스텝 롤을 재서 pixel→body 오프셋에 더한다.
+            # 🚨 **부호를 이론으로 따지지 않는다** (몸 clock 논쟁이 세 번
+            #    반복된 교훈). 카메라 프림의 **실제 월드 자세**를 읽어
+            #    "월드 오른쪽" 이 화면 몇 도에 찍히는지 직접 계산한다.
+            #    검출기의 화소 방위 규약: φ = atan2(dy, dx), dx = 화면 오른쪽,
+            #    dy = 화면 **아래**. USD 카메라는 로컬 −Z 를 보고 +X 가 화면
+            #    오른쪽, +Y 가 화면 위다 → 화면아래 = −Y_cam.
+            _camp = r.get("cam_prim")
+            if _camp is not None:
+                _Rc = wrot(_camp)
+                _img_r = _Rc @ np.array([1.0, 0.0, 0.0])    # 화면 오른쪽
+                _img_d = _Rc @ np.array([0.0, -1.0, 0.0])   # 화면 아래
+                _fwd_w = _Rc @ np.array([0.0, 0.0, -1.0])   # 광축(전방)
+                _up_w = np.array([0.0, 0.0, 1.0])
+                # 임무 규칙의 오른쪽 = 진행방향 × 중력반대 (월드·IMU 기준)
+                _right_w = np.cross(_fwd_w, _up_w)
+                _n = float(np.linalg.norm(_right_w))
+                if _n > 1e-6:
+                    _right_w /= _n
+                    _phi_r = math.degrees(math.atan2(
+                        float(np.dot(_right_w, _img_d)),
+                        float(np.dot(_right_w, _img_r))))
+                    # 컨트롤러 규약: body = 화소 + offset(180), right 는
+                    # branch_right_deg 와 비교 → right 를 화소에서 직접 준다.
+                    r["phi_right"] = _phi_r
+                    r["ctl"].k["branch_right_deg"] = (_phi_r + 180.0) % 360.0
+                    # 절대 롤(표시용) — 화면 위가 월드 위에서 얼마나 돌았나
+                    _img_u = -_img_d
+                    _upp = _up_w - _fwd_w * float(np.dot(_up_w, _fwd_w))
+                    if float(np.linalg.norm(_upp)) > 1e-6:
+                        _upp /= float(np.linalg.norm(_upp))
+                        r["roll_abs"] = math.degrees(math.atan2(
+                            float(np.dot(_upp, _img_r)),
+                            float(np.dot(_upp, _img_u))))
             _ds = r["ctl"].step(PHYSICS_DT, recall=r.get("recall", False),
                                 suppress_branch=r.get("leg_dev", 0.0) > 0.0018,
                                 cond=None if _cd is None else _cd.as_dict(),
@@ -2194,7 +2240,9 @@ while True:
                 _dp = float(np.dot(_h1, _rgt))
                 print(f"[{r['name']:8s}] [턴검증] 진입 기동 종료 — 월드 기준 "
                       f"{'✅ 오른손 턴' if _dp > 0.2 else '🚨 왼손 턴' if _dp < -0.2 else '? 직진(꺾임 미미)'}"
-                      f" (h0→h1·right = {_dp:+.2f})")
+                      f" (h0→h1·right = {_dp:+.2f}, 절대롤 "
+                      f"{r.get('roll_abs', 0.0):+.0f}°, 월드오른쪽=화소 "
+                      f"{r.get('phi_right', 0.0):+.0f}°)")
                 r["turn_h0"] = None
             r["ctl_state"], r["slip"] = _ds.state, _ds.slip_ratio
             # 🚨 부호를 살린다 — RETURN 은 음수 지령으로 뒤로 나온다.
@@ -2271,26 +2319,36 @@ while True:
                 r["dead"] = True
                 continue
             if r.get("ctl_state") == "DONE":
-                # 🚨 **가짜 DONE 검문** (2026-08-07) — 복귀가 끝 구간(코스 끝
-                #    − END_S)을 벗어나지도 않았는데 거리 적산이 0 에 닿아
-                #    DONE 이 나면, 재출발 즉시 recall 이 다시 걸려 랩만 헛돈다
-                #    (실측: 물리 3랩에 로그 155랩). 숨기지 않고 실패로 끝낸다.
-                if s_now >= r["cl"].total - END_S - 0.02:
-                    print(f"[{r['name']:8s}] ❌ 복귀 실패 — DONE 시점에 아직 "
-                          f"끝 구간 (s={s_now * 1000:.0f}mm ≥ "
-                          f"{(r['cl'].total - END_S) * 1000:.0f}mm). "
-                          f"거리 적산이 실주행보다 빨리 소진된 것")
-                    drive(r, 0.0)
-                    r["dead"] = True
+                # 🎯 **실전 임무는 왕복 반복이 아니다** (2026-08-08 사용자 확정:
+                #    *"왕복 무한 반복은 map_test 때처럼 짧은 구간을 확인하려던
+                #    것. 복귀의 끝지점은 샤워 배수구를 밖으로 나가는 것"*).
+                # 🚨 컨트롤러의 DONE 은 **적산 거리가 0 에 닿았다**는 뜻이지
+                #    "입구에 도착했다"가 아니다. 나갈 때 시각 오도메트리가
+                #    부풀려 세면(실측 슬립 2.00 = 두 배로 읽음) 돌아올 때
+                #    **관 한복판에서** 0 에 닿는다 → 예전 코드는 그것을 랩
+                #    완료로 보고 재출발시켜 **다시 관으로 들어갔다**
+                #    (사용자 관찰). 이제 위치로 판정한다.
+                if s_now > EXIT_S:
+                    # 아직 관 안이다 — 복귀를 이어 간다. 적산이 모자란 만큼
+                    # 채워 주고 상태를 RETURN 으로 되돌린다.
+                    # ⚠ 이 보충은 **채점 계층이 오도메트리 결함을 메우는 것**
+                    #    이다. 근본 해결은 시각 오도메트리의 과대적산 수정.
+                    if not r.get("_odom_warned"):
+                        print(f"[{r['name']:8s}] ⚠ 적산 소진(DONE)인데 아직 관 "
+                              f"안(s={s_now * 1000:.0f}mm > 출구 "
+                              f"{EXIT_S * 1000:.0f}mm) — 복귀 계속 "
+                              f"(오도메트리 과대적산)")
+                        r["_odom_warned"] = True
+                    r["ctl"].s.state = "RETURN"
+                    r["ctl"].s.distance_m = float(s_now)
                     continue
-                r["lap"] += 1
-                r["recall"] = False
-                r["started"] = False
-                # 🎯 재출발 유예 (2026-08-07) — 복귀 종점이 접합부 모서리라,
-                #    비틀린 몸으로 곧장 재진입을 걸면 쐐기가 된다(실측: 1랩은
-                #    안착 직후 곧은 몸이라 성공, 2랩 재출발만 s=178 RECOVER
-                #    동결 사망). 2초간 관절을 펴고 나서 출발한다.
-                r["straighten_n"] = int(2.0 * PHYSICS_HZ)
+                print(f"[{r['name']:8s}] ✅ **임무 완료** — 샤워 배수구로 복귀 "
+                      f"(s={s_now * 1000:.0f}mm). 총 {r['lap'] + 1}회 주행")
+                drive(r, 0.0)
+                r["dead"] = True
+                continue
+                # (아래 재출발 코드는 왕복 반복 규약의 잔재 — 실전 임무는
+                #  배수구를 나가면 끝이므로 도달하지 않는다. 2026-08-08)
                 r["s_prog"], r["prog_mark"] = -1.0, step
                 _ctl_kn = dict(
                     branch_rule=os.environ.get("BRANCH_RULE", "right"))
@@ -2348,12 +2406,13 @@ while True:
         _line = []
         for r in robots:
             p1 = wpos(r["seg1"])
-            s_now, off_now, _i = r["cl"].nearest(p1)
+            s_now, off_now, _i = r["cl"].nearest(p1, r.get("s_hint"))
             if NAV == "vision":
                 _c = r.get("cond")
                 _line.append(
-                    f"{r['name']} s={r['cl'].nearest(wpos(r['seg1']))[0]*1000:5.0f}"
+                    f"{r['name']} s={s_now*1000:5.0f}"
                     f" {r.get('ctl_state','?')}"
+                    f" 롤{r.get('roll_abs', 0.0):+.0f}°우측{r.get('phi_right', 0.0):+.0f}°"
                     f" v={r.get('v_cmd',0)*1000:3.0f}mm/s"
                     f" 시각속도={'--' if r.get('vis_mps') is None else format(r['vis_mps']*1000,'.0f')}"
                     f" 슬립={r.get('slip',0):.2f}"
@@ -2390,7 +2449,7 @@ while True:
 print("=" * 78)
 for r in robots:
     p1 = wpos(r["seg1"])
-    s_now, off_now, _i = r["cl"].nearest(p1)
+    s_now, off_now, _i = r["cl"].nearest(p1, r.get("s_hint"))
     print(f"결과  {r['name']:8s} 왕복 {r['lap']}회  끼임 {r['stuck']}회  "
           f"s={s_now * 1000:.0f}mm  이탈 {off_now * 1000:.1f}mm "
           f"(평균 {np.mean(r.get('off_hist', [0])) * 1000:.1f} / 최대 "

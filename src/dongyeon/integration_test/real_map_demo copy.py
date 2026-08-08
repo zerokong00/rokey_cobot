@@ -1459,22 +1459,6 @@ if not NO_ROS:
                 CompressedImage, "/repair_robot/active_cam/rgb/compressed", qos)
             self.pub_which = self.create_publisher(
                 String, "/repair_robot/active_cam/which", qos)
-            # 🚨 2026-08-08 — OpenCV(find_wall_hole/find_weld_bead) 판정을
-            #    시각화해 발행한다. YOLO 디버그(/defect/debug_image/
-            #    compressed, active_cam_vision_node.py)와는 별개 토픽 —
-            #    이쪽은 Depth 필터·expect_px 매칭까지 반영된 **실제 판정
-            #    근거**고, INSPECT/RECHECK/VERIFY 촬영 순간에만 갱신된다
-            #    (active_cam 처럼 매 프레임 나오지 않는다).
-            self.pub_opencv_debug = self.create_publisher(
-                CompressedImage, "/repair_robot/opencv_debug/compressed", qos)
-            # 🚨 2026-08-08 — 위 이미지는 판정 순간의 정지 스냅샷이라 뷰어가
-            #    그걸로 화면을 통째로 갈아치우면 "얼어붙는" 느낌이 난다
-            #    (사용자 지적). 뷰어가 **실시간 raw 프레임 위에 직접 겹쳐
-            #    그릴 수 있게** hole/bead 판정 자체(좌표·반경·매칭 여부)를
-            #    JSON 으로도 따로 발행한다 — 이미지 토픽은 archival/--shots
-            #    용으로 남겨둔다.
-            self.pub_opencv_judge = self.create_publisher(
-                String, "/repair_robot/opencv_judgement/json", qos)
             self.n = 0
             # 🚨 2026-08-07 — YOLO 2차검증(active_cam_vision_node.py, PC2)의
             #    의견을 받는다. PipeVisionBridge(front_camera 고정, Depth/
@@ -1537,32 +1521,6 @@ if not NO_ROS:
             self.pub_which.publish(wm)
             self.n += 1
 
-        def publish_opencv_debug(self, img_rgb, frame_name):
-            """draw_inspect_debug() 가 그린 이미지를 그대로 발행한다(archival/--shots 대응)."""
-            ok, buf = cv2.imencode(
-                ".jpg", np.ascontiguousarray(img_rgb)[:, :, ::-1],
-                [cv2.IMWRITE_JPEG_QUALITY, 85])
-            if not ok:
-                return
-            m = CompressedImage()
-            m.header.stamp = self.get_clock().now().to_msg()
-            m.header.frame_id = frame_name
-            m.format = "jpeg"
-            m.data = buf.tobytes()
-            self.pub_opencv_debug.publish(m)
-
-        def publish_opencv_judgement(self, payload):
-            """연속(실시간) OpenCV 판정 좌표·근거를 JSON 으로 발행한다.
-
-            뷰어가 이걸로 **살아있는 raw 프레임 위에 직접** 원을 그린다 —
-            표시 전용이다. 임무가 실제로 결함을 등록·확정하는 시점은 지금도
-            INSPECT/RECHECK/VERIFY 세 번뿐이고(§5.3 절차, inspect_defect()),
-            이 실시간 스트림은 그 판정을 바꾸지 않는다.
-            """
-            m = String()
-            m.data = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
-            self.pub_opencv_judge.publish(m)
-
     rclpy.init()
     cam_bridge = ActiveCamBridge(_RIGS_BY_NAME)
     print("[준비] ROS2 활성 카메라 발행 — /repair_robot/active_cam/rgb/compressed "
@@ -1572,8 +1530,6 @@ else:
 
 CAM_PUBLISH_HZ = 10.0
 _cam_pub_last = 0.0
-_judge_pub_last = 0.0
-_judge_exc_last_print = 0.0
 
 # 🚨 2026-08-07 — 예전엔 여기 pipe_inspect_demo::pipe_vision_node(YOLO)용
 #    RGB+Depth+CameraInfo+Odom+IMU 5-토픽 동기화 묶음(PipeVisionBridge,
@@ -1766,59 +1722,6 @@ def find_weld_bead(rgb, expect_px=None):
     return best
 
 
-def draw_inspect_debug(rgb, hole, bead, expect_px, win_px=70):
-    """find_wall_hole/find_weld_bead 가 실제로 무엇을 보고 확정했는지 그린다.
-
-    YOLO 와 무관한 순수 OpenCV 판정 시각화 — 탐색 창(회색 사각), 결함이
-    있어야 할 자리(청록 십자, expect_px), 채택/기각된 후보의 윤곽과 판정
-    근거(임계값·거리·테두리 depth)를 함께 그린다. hole/bead 는 matched 로
-    걸러지기 **전** 원본을 넘겨야 기각된 후보(빨강)도 보인다 — 호출자가
-    matched 로 None 처리하기 전의 값을 따로 챙겨서 넘길 것.
-    """
-    img = np.ascontiguousarray(np.asarray(rgb)[:, :, :3].astype(np.uint8)).copy()
-    if expect_px is not None:
-        ex, ey = int(expect_px[0]), int(expect_px[1])
-        cv2.rectangle(img, (ex - win_px, ey - win_px), (ex + win_px, ey + win_px),
-                     (160, 160, 160), 1)
-        cv2.drawMarker(img, (ex, ey), (0, 255, 255), cv2.MARKER_CROSS, 18, 2)
-
-    def _label(pos, text, color):
-        cv2.putText(img, text, pos, cv2.FONT_HERSHEY_SIMPLEX, 0.45,
-                   (0, 0, 0), 3, cv2.LINE_AA)
-        cv2.putText(img, text, pos, cv2.FONT_HERSHEY_SIMPLEX, 0.45,
-                   color, 1, cv2.LINE_AA)
-
-    if hole is not None:
-        cx, cy = int(hole["cx"]), int(hole["cy"])
-        r = max(4, int(hole["r_eq_px"]))
-        matched = hole.get("matched", True)
-        # 🚨 이 img 는 아직 RGB 채널 순서다(발행 직전에야 BGR 로 뒤집는다,
-        #    ActiveCamBridge.publish_opencv_debug 참고) — cv2 관례대로
-        #    (0,0,255) 를 "빨강" 삼으면 실제로는 파랑이 그려진다. RGB 순서
-        #    기준 빨강은 (255,0,0).
-        color = (0, 255, 0) if matched else (255, 0, 0)
-        cv2.circle(img, (cx, cy), r, color, 2)
-        text = (f"hole {hole['area_px']}px thr={hole['thr']:.0f} "
-               f"d={hole.get('dist_px', 0):.0f}px "
-               f"{'MATCH' if matched else 'REJECT'}")
-        if hole.get("rim_m"):
-            text += f" rim={hole['rim_m'] * 1000:.0f}mm"
-        _label((cx + r + 4, max(12, cy)), text, color)
-
-    if bead is not None:
-        cx, cy = int(bead["cx"]), int(bead["cy"])
-        r = max(4, int(bead["r_eq_px"]))
-        matched = bead.get("matched", True)
-        color = (255, 140, 0) if matched else (255, 0, 0)
-        cv2.circle(img, (cx, cy), r, color, 2)
-        text = f"bead {bead['area_px']}px d={bead.get('dist_px', 0):.0f}px"
-        if "matched" in bead:
-            text += " MATCH" if matched else " REJECT"
-        _label((cx + r + 4, max(12, cy) + 16), text, color)
-
-    return img
-
-
 def front_frames(warm=200):
     """전방 RGB + Depth.
 
@@ -1841,17 +1744,9 @@ def front_frames(warm=200):
     return None, None
 
 
-def defect_pixel(d, cam_path=None):
-    """결함 벽면 점을 지정 카메라의 어안 화소로 투영 (등거리 r = f·θ).
-
-    cam_path 를 안 주면 FRONT_CAM(front_camera). torch_camera 는 front 와
-    똑같은 내부파라미터로 구성돼 있다(TORCH_CAM_F_PX == F_PX, 같은 HFOV,
-    같은 CAM_W/CAM_H — 위 torch_camera 조립부 참고) — 그래서 INTR 를 그대로
-    재사용해도 되고, 프림 경로(cam_path)만 바꾸면 된다. torch_camera 는
-    aim_torch_camera() 가 매 틱 재조준하므로, 여기서 매번 현재 월드 변환을
-    새로 읽는 이 함수 구조가 그대로 맞는다(재조준된 방향이 자동 반영됨).
-    """
-    cam_prim = stage.GetPrimAtPath(cam_path or FRONT_CAM)
+def defect_pixel(d):
+    """결함 벽면 점을 전방 카메라 어안 화소로 투영 (등거리 r = f·θ)."""
+    cam_prim = stage.GetPrimAtPath(FRONT_CAM)
     if not cam_prim.IsValid():
         return None
     _XC.Clear()
@@ -1916,7 +1811,6 @@ def inspect_defect(d, tag):
         return cond, None, None, z, None
     hole = find_wall_hole(rgb, expect_px=px, depth=z)
     bead = find_weld_bead(rgb, expect_px=px)
-    hole_raw, bead_raw = hole, bead   # matched=False 로 걸러지기 전 원본 — 디버그 시각화용
     if hole is None:
         print(f"  [검출] {tag} 구멍 없음 — 벽면이 이어져 있다 "
               f"(예상 {px[0]:.0f},{px[1]:.0f} / 카메라 "
@@ -1939,46 +1833,7 @@ def inspect_defect(d, tag):
             bead = None
     else:
         print(f"  [검출] {tag} 비드(주황) 없음")
-    _publish_opencv_debug(rgb, hole_raw, bead_raw, px, tag)
     return cond, hole, bead, z, px
-
-
-def _judgement_payload(hole, bead, px, tag, cond=None, joint_deg=None):
-    """find_wall_hole/find_weld_bead(+ 선택적 관상태) 결과를 JSON 발행용 dict 로 포장한다.
-
-    hole/bead 는 이미 python float/int/bool/None 만 담고 있어(각 함수 안에서
-    float()/int() 캐스팅됨) json.dumps 에 그대로 들어간다. cond 는
-    PipeConditionDetector.run() 결과 중 표시에 필요한 필드만 뽑은 dict —
-    front_camera 에서만 채워 보낸다(§ below, 관절 비틀림 판단 과정).
-    """
-    payload = {
-        "tag": str(tag),
-        "px": [float(px[0]), float(px[1])] if px is not None else None,
-        "win_px": 70,
-        "hole": hole,
-        "bead": bead,
-    }
-    if cond is not None:
-        payload["cond"] = cond
-    if joint_deg is not None:
-        payload["joint_deg"] = float(joint_deg)
-    return payload
-
-
-def _publish_opencv_debug(rgb, hole, bead, px, tag):
-    """OpenCV 판정 시각화 — ROS 로 실시간 발행하고(--shots 면) PNG 로도 남긴다.
-
-    hole/bead 는 matched 로 걸러지기 전 원본이어야 기각 사례도 보인다
-    (inspect_defect() 의 hole_raw/bead_raw). YOLO 와 완전히 무관하다.
-    """
-    if rgb is None:
-        return
-    img = draw_inspect_debug(rgb, hole, bead, px)
-    if cam_bridge is not None:
-        cam_bridge.publish_opencv_debug(img, "front_camera")
-    if SHOTS:
-        safe_tag = tag.replace(" ", "_")
-        _save_png(img, OUT / f"{safe_tag}_opencv_debug.png")
 
 
 def _save_png(img, path):
@@ -2338,83 +2193,6 @@ while True:
     #    항상 정의돼 있다). 비용은 삼각함수 몇 번뿐이라 무시할 만하다.
     if TORCH_CAM_OK:
         aim_torch_camera(tip_end_world())
-
-    # 🚨 2026-08-08 — 표시 전용 실시간 판정(사용자 요청: "스냅샷 말고 실시간
-    #    으로", 이어서 "front_camera에만 표시하고 torch/back 은 빼자"로
-    #    범위를 다시 좁혔다). inspect_defect() 의 3번짜리 스냅샷(INSPECT/
-    #    RECHECK/VERIFY, 각각 front_frames(warm=200) 로 200스텝 재렌더)과
-    #    달리, 이건 이미 ActiveCamBridge 가 매 틱 공짜로 읽는 것과 **같은**
-    #    rig 애노테이터(GUI 모드라 매 틱 render=True 로 항상 최신)를 그대로
-    #    읽어서 추가 렌더 비용이 없다. find_wall_hole/find_weld_bead 자체는
-    #    inspect_defect() 와 동일 함수라 판정 로직이 갈라지지 않는다 —
-    #    여기서 계산한 결과는 **결코 임무 판정(결함 등록, 용접봉 예산 확정)
-    #    에 쓰이지 않는다**, 화면 표시용 JSON 발행뿐이다.
-    # 🚨 SETTLE 은 로봇이 아직 안착 중이라 카메라/Depth 가 초기화 직후의
-    #    불완전한 프레임일 수 있다 — inspect_defect() 는 이 타이밍에 한 번도
-    #    불린 적이 없어서 검증되지 않은 입력이다(cur=0 이라 d_cur 는 SETTLE
-    #    부터 이미 유효해서, 막지 않으면 첫 틱부터 돈다). 표시 전용 기능이
-    #    이런 초기 프레임 때문에 시뮬레이션 전체를 죽이면 안 되므로 SETTLE
-    #    은 아예 빼고, 그래도 모를 예외는 아래 try/except 로 한 번 더 막는다
-    #    (실패해도 그 틱만 건너뛰고 계속 돈다 — 2026-08-08 실측: 아래
-    #    curve_ahead AttributeError 가 이 방어 덕에 미션을 안 죽였다).
-    _active_cam = active_camera_name(state)
-    if (cam_bridge is not None and d_cur is not None and state != "SETTLE"
-            and _active_cam == "front_camera"
-            and _now_loop - _judge_pub_last >= 1.0 / CAM_PUBLISH_HZ):
-        _judge_pub_last = _now_loop
-        try:
-            _live_rig = _RIGS_BY_NAME.get(_active_cam)
-            if _live_rig is not None:
-                _live_ann, _live_dep = _live_rig
-                _live_c, _live_z = _live_ann.get_data(), _live_dep.get_data()
-                if _live_c is not None and getattr(_live_c, "size", 0):
-                    _live_rgb = np.asarray(_live_c)[:, :, :3].astype(np.uint8)
-                    _live_depth = (np.asarray(_live_z, dtype=np.float32)
-                                  if _live_z is not None and getattr(_live_z, "size", 0)
-                                  else None)
-                    _live_px = defect_pixel(d_cur)
-                    _live_hole = find_wall_hole(_live_rgb, expect_px=_live_px, depth=_live_depth)
-                    _live_bead = find_weld_bead(_live_rgb, expect_px=_live_px)
-                    # 🚨 "front 카메라에 조인트 비틀림 판단 과정도"(사용자 요청).
-                    #    PipeConditionDetector.run() 이 판정 전에 로봇 자체
-                    #    벨로우즈 관절의 굽힘각(joint_angle_deg, §1 inspect_
-                    #    defect() 와 동일 계산)을 먼저 보고, 그게 bend_angle_deg
-                    #    문턱을 넘으면 "곡관 접근 중이라 원형도 판정을 생략한다"고
-                    #    스스로 밝힌다(c.reason 에 그대로 찍힘) — 이게 "조인트
-                    #    비틀림 판단"이다.
-                    # 🚨 2026-08-08 실측 — condition/detector.py 가 **이 저장소에
-                    #    두 벌**이다: src/son/condition/detector.py(Condition 에
-                    #    curve_ahead 있음) 와 dongyeon 자신의 integration_test/
-                    #    condition/detector.py(없음). real_map_demo.py 는
-                    #    sys.path 상 후자를 실제로 import 하고 있어서 .curve_ahead
-                    #    를 그냥 읽으면 AttributeError 로 매 틱 실패했다(로그로
-                    #    확인, try/except 가 미션은 지켜줬다) — getattr 로
-                    #    양쪽 버전 다 안전하게 만든다.
-                    _live_joint = (math.degrees(float(np.max(np.abs(
-                        art.get_joint_positions()[bel_idx])))) if bel_idx else 0.0)
-                    _live_cond_payload = None
-                    if _live_depth is not None:
-                        _live_cond = detector.run(_live_depth, joint_angle_deg=_live_joint)
-                        _live_cond_payload = {
-                            "state": _live_cond.state,
-                            "speed": _live_cond.speed,
-                            "circularity": _live_cond.circularity,
-                            "roughness": _live_cond.roughness,
-                            "offset_mm": _live_cond.offset_mm,
-                            "curve_ahead": getattr(_live_cond, "curve_ahead", False),
-                            "reason": _live_cond.reason,
-                        }
-                    cam_bridge.publish_opencv_judgement(
-                        _judgement_payload(_live_hole, _live_bead, _live_px, state,
-                                          cond=_live_cond_payload, joint_deg=_live_joint))
-        except Exception as _live_exc:
-            # 표시 전용 기능이라 실패해도 미션(주행·용접·판정)은 절대 멈추면
-            # 안 된다 — 이 틱만 건너뛰고 다음 틱에 다시 시도한다. 반복 실패 시
-            # 콘솔이 10Hz 로 도배되지 않도록 5초에 한 번만 찍는다.
-            if _now_loop - _judge_exc_last_print >= 5.0:
-                _judge_exc_last_print = _now_loop
-                print(f"[경고] 실시간 판정 표시 실패({_active_cam}, {state}): "
-                      f"{type(_live_exc).__name__}: {_live_exc}")
 
     if state == "SETTLE":
         if t_state > SETTLE_STEPS:
