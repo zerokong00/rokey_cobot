@@ -110,8 +110,8 @@ if not NO_ROS:
         from rclpy.node import Node                        # noqa: E402
         from rclpy.qos import (QoSProfile, ReliabilityPolicy,  # noqa: E402
                                HistoryPolicy)
-        from sensor_msgs.msg import CompressedImage        # noqa: E402
-        from std_msgs.msg import String                    # noqa: E402
+        from sensor_msgs.msg import CompressedImage          # noqa: E402
+        from std_msgs.msg import String, Bool                # noqa: E402
     except ImportError as _rclpy_exc:
         print(f"[경고] rclpy 없음 — ROS2 카메라 발행 끔 ({_rclpy_exc}). "
               f"LD_LIBRARY_PATH 에 isaacsim.ros2.bridge/humble/lib 있는지 "
@@ -1460,6 +1460,42 @@ if not NO_ROS:
             self.pub_which = self.create_publisher(
                 String, "/repair_robot/active_cam/which", qos)
             self.n = 0
+            # 🚨 2026-08-07 — YOLO 2차검증(active_cam_vision_node.py, PC2)의
+            #    의견을 받는다. PipeVisionBridge(front_camera 고정, Depth/
+            #    Odom/IMU 동기화 필요) 를 걷어내면서 이쪽으로 옮겼다 — 한
+            #    로봇이 정찰+수리를 동시에 하니 축 위치 추적이 필요 없어져,
+            #    active_cam(전진→front/후진→back/용접→torch)에 YOLO만 얹은
+            #    가벼운 노드로 충분하다(설계 상의, 2026-08-07). 절대 이걸로
+            #    OpenCV 판정을 대체하지 않는다 — 항상 참고용 비동기 의견.
+            self.sub_detected = self.create_subscription(
+                Bool, "/defect/detected", self._on_detected, qos)
+            self.sub_report = self.create_subscription(
+                String, "/defect/report_json", self._on_report, 10)
+            self.last_detected, self.last_detected_t = None, 0.0
+            self.last_report, self.last_report_t = None, 0.0
+
+        def _on_detected(self, msg):
+            self.last_detected, self.last_detected_t = bool(msg.data), time.time()
+
+        def _on_report(self, msg):
+            try:
+                self.last_report = json.loads(msg.data)
+                self.last_report_t = time.time()
+            except (ValueError, TypeError):
+                pass
+
+        def yolo_opinion(self, max_age_s=3.0):
+            """최근 max_age_s 초 이내 YOLO 의견 — (detected: bool|None, report: dict|None).
+
+            너무 오래된(YOLO 가 안 돌고 있거나 느린) 값은 None 으로 취급해
+            "의견 없음"과 "결함 없다고 봄" 을 헷갈리지 않게 한다.
+            """
+            now = time.time()
+            detected = (self.last_detected
+                       if (now - self.last_detected_t) <= max_age_s else None)
+            report = (self.last_report
+                     if (now - self.last_report_t) <= max_age_s else None)
+            return detected, report
 
         def publish(self, name):
             rig = self.rigs.get(name)
@@ -1494,6 +1530,40 @@ else:
 
 CAM_PUBLISH_HZ = 10.0
 _cam_pub_last = 0.0
+
+# 🚨 2026-08-07 — 예전엔 여기 pipe_inspect_demo::pipe_vision_node(YOLO)용
+#    RGB+Depth+CameraInfo+Odom+IMU 5-토픽 동기화 묶음(PipeVisionBridge,
+#    front_camera 고정)이 있었다. 정찰+수리를 한 로봇이 동시에 하면서 축
+#    위치 추적(Odom/IMU)이 필요 없어져 — active_cam(전진→front/후진→back/
+#    용접→torch)에 YOLO만 얹은 가벼운 노드(active_cam_vision_node.py, PC2)
+#    로 교체했다. YOLO 2차검증 의견(/defect/detected,/defect/report_json)
+#    구독은 ActiveCamBridge 로 옮겼다(위 클래스, yolo_opinion() 참고).
+
+
+def _log_yolo_opinion(d_cur, tag):
+    """OpenCV 가 방금 찾은 결함(d_cur)에 대해 YOLO(active_cam_vision_node) 의
+    최근 의견을 나란히 찍는다 — **판정을 바꾸지 않는다**, 참고용 로그일 뿐이다.
+    YOLO 가 안 돌고 있거나(PC2 미실행) 응답이 오래됐으면(3초 초과) "의견
+    없음"으로 찍고 그대로 진행한다 — OpenCV 판정 흐름은 절대 안 막는다.
+    """
+    if cam_bridge is None or d_cur is None:
+        return
+    detected, report = cam_bridge.yolo_opinion()
+    if detected is None:
+        print(f"  [YOLO 2차검증·{tag}] 의견 없음 (최근 3초 내 수신 안 됨 "
+              f"— PC2/pipe_vision 미실행이거나 느림)")
+        return
+    line = f"  [YOLO 2차검증·{tag}] {'동의(검출함)' if detected else '불일치(YOLO 는 못 봄)'}"
+    if report is not None:
+        try:
+            yolo_s_m = float(report["defect"]["axial_position_from_entry_m"])
+            diff_mm = abs(yolo_s_m - d_cur["s"]) * 1000.0
+            line += (f", YOLO 축위치 {yolo_s_m * 1000:.0f}mm "
+                    f"(OpenCV {d_cur['s'] * 1000:.0f}mm, 차 {diff_mm:.0f}mm)")
+        except (KeyError, TypeError, ValueError):
+            pass
+    print(line)
+
 
 sys.path.insert(0, str(SON))
 from condition.detector import PipeConditionDetector      # noqa: E402
@@ -2286,6 +2356,7 @@ while True:
             rod_required_mm = req
             print(f"  [용접봉] 이번 결함 예상 소요 {req:.0f}mm  "
                   f"(잔량 {rod_budget.remaining_mm:.0f}mm)")
+            _log_yolo_opinion(d_cur, "INSPECT")
             if not rod_ok:
                 rod_budget.mark_exhausted_if_needed(req)
                 end_reason = rod_budget.s.reason
@@ -2335,6 +2406,7 @@ while True:
                 rod_ok = rod_budget.can_repair(rod_required_mm)
                 print(f"  [용접봉] 재확인에서 결함 재검출 안 됨 — 최초 "
                       f"추정 {rod_required_mm:.0f}mm 유지")
+            _log_yolo_opinion(d_cur, "RECHECK")
             if not rod_ok:
                 rod_budget.mark_exhausted_if_needed(rod_required_mm)
                 end_reason = rod_budget.s.reason
@@ -2541,6 +2613,27 @@ while True:
             if WATER:
                 msg += f"  누수 입자 {leak_count(d_cur)}개"
             print(f"[VERIFY] 결함 {cur + 1} 판정 {msg}")
+            # 🚨 용접 완료도 YOLO 2차검증 — 판정은 그대로 비드(색)가 하고,
+            #    YOLO 는 "수리 후에도 크랙을 여전히 보는가" 를 나란히 로그로
+            #    남긴다(사용자 지시: "대체 말고 같이"). 기대: 진짜 고쳐졌으면
+            #    YOLO 도 더는 못 봐야(detected=False) 일치.
+            if cam_bridge is not None:
+                _yv_det, _ = cam_bridge.yolo_opinion()
+                if _yv_det is None:
+                    print("  [YOLO 용접완료·2차검증] 의견 없음 "
+                          "(최근 3초 내 수신 안 됨)")
+                else:
+                    _yolo_fixed = not _yv_det
+                    _bead_fixed = bool(ok) if ok is not None else None
+                    if _bead_fixed is None:
+                        _cmp = "비드 판정 불가라 비교 생략"
+                    elif _yolo_fixed == _bead_fixed:
+                        _cmp = "비드 판정과 동의"
+                    else:
+                        _cmp = "⚠ 비드 판정과 불일치"
+                    print(f"  [YOLO 용접완료·2차검증] "
+                          f"{'미검출(수리됨 의견)' if _yolo_fixed else '검출함(안 고쳐짐 의견)'}"
+                          f" — {_cmp}")
             verdicts.append({"i": cur, "ok": ok, "msg": msg})
             # 🚨 §8.3 / 임무 규칙 8 — 복귀 사유는 관 단절과 용접봉 소진뿐이다.
             #    수리했다고 복귀하지 않는다 — 소진 여부는 이제 *다음* 결함을
