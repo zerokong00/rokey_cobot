@@ -58,6 +58,12 @@ class CameraMonitor(Node):
         self.last = {}
         self.info = None
         self.t0 = time.time()
+        # 🚨 "한 번도 못 받았다" 와 "받다가 끊겼다" 는 **원인이 전혀 다르다.**
+        #    앞은 설정 문제(도메인·QoS·ns), 뒤는 Isaac 이 멈춘 것이다. 누적
+        #    수신 수와 마지막 수신 시각을 따로 들고 있어야 구분할 수 있다.
+        #    (안 그러면 잘 받다 끊겼을 때 "GUI 인가?" 라는 틀린 진단이 나온다)
+        self.total = 0
+        self.last_rx = 0.0
 
         self.create_subscription(CompressedImage, self.t.rgb,
                                  lambda m: self._take("rgb", m), qos)
@@ -73,6 +79,7 @@ class CameraMonitor(Node):
 
         self.create_timer(float(self.get_parameter("period_sec").value),
                           self._report)
+        contract.log_env(self.get_logger())
         self.get_logger().info(
             f"구독 시작 [{ns}] — {self.t.rgb} / {self.t.depth} / "
             f"{self.t.camera_info}  (BEST_EFFORT, domain "
@@ -81,6 +88,8 @@ class CameraMonitor(Node):
     def _take(self, key, msg):
         self.n[key] += 1
         self.last[key] = msg
+        self.total += 1
+        self.last_rx = time.time()
 
     def _on_info(self, msg):
         self.info = msg
@@ -112,32 +121,44 @@ class CameraMonitor(Node):
                 f"max {fin.max():.4f} m{warn}")
 
     def _report(self):
+        now = time.time()
+        live = any(self.n.values())
+        # 지금 프레임이 안 들어오면 아래 통계는 **낡은 값**이다. 현재 값처럼
+        # 보이면 "멈춘 화면을 보며 잘 되고 있다" 고 오판한다.
+        tag = "" if live else "  (낡음)"
+
         lines = ["  " + "  ".join(f"{k} {v}Hz" for k, v in self.n.items())]
 
         if "rgb" in self.last:
-            lines.append(self._rgb_line("rgb", self.last["rgb"]))
+            lines.append(self._rgb_line("rgb", self.last["rgb"]) + tag)
         if "rear_rgb" in self.last:
-            lines.append(self._rgb_line("rear_rgb", self.last["rear_rgb"]))
+            lines.append(self._rgb_line("rear_rgb", self.last["rear_rgb"]) + tag)
         if "depth" in self.last:
             lines.append(self._depth_line("depth", self.last["depth"],
-                                          codec.png16_to_depth_m))
+                                          codec.png16_to_depth_m) + tag)
         if "depth_raw" in self.last:
             lines.append(self._depth_line("depth32", self.last["depth_raw"],
-                                          codec.image_to_depth_m))
+                                          codec.image_to_depth_m) + tag)
         if self.info is not None:
             k = self.info.k
             lines.append(f"  info      {self.info.width}x{self.info.height}  "
                          f"fx {k[0]:.1f}  cx {k[2]:.1f}  cy {k[5]:.1f}  "
                          f"모델 {self.info.distortion_model or '(없음)'}")
 
-        if not any(self.n.values()):
-            el = time.time() - self.t0
-            lines.append(f"  프레임 0 ({el:.0f}초째) — ① Isaac 이 GUI 인가 "
-                         f"② Play 인가 ③ ROS_DOMAIN_ID 가 "
-                         f"{contract.ROS_DOMAIN_ID} 인가 ④ ns 파라미터가 "
-                         f"맞는가 (지금 {self.t.ns!r})")
-        else:
+        if live:
             self._save()
+        elif self.total == 0:
+            # 한 번도 못 받았다 → **설정 문제**다
+            lines.append(f"  프레임 0 ({now - self.t0:.0f}초째) — ① Isaac 이 "
+                         f"떠 있고 Play 인가 ② ROS_DOMAIN_ID 가 "
+                         f"{contract.ROS_DOMAIN_ID} 인가 ③ ns 파라미터가 "
+                         f"맞는가 (지금 {self.t.ns!r}) ④ 발행 QoS 가 "
+                         f"BEST_EFFORT 인가")
+        else:
+            # 받다가 끊겼다 → **Isaac 이 멈춘 것**이다. 설정은 이미 맞았다
+            lines.append(f"  ⛔ 프레임 끊김 {now - self.last_rx:.0f}초 "
+                         f"(누적 {self.total}장 받았다) — Isaac 이 살아 있는지, "
+                         f"Play 상태인지 확인할 것")
 
         self.get_logger().info("\n".join(lines))
         for k in self.n:

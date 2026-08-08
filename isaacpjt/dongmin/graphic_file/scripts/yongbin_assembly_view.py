@@ -36,8 +36,16 @@ from isaacsim.core.api import World
 from isaacsim.core.utils.viewports import set_camera_view
 from pxr import Gf, Sdf, UsdGeom, UsdLux, UsdShade
 
-SRC = Path("/home/rokey/Downloads/yongbin")
-META = json.loads((SRC / "parts_meta.json").read_text())
+# 부품 USD: ../assets/{robot,pipe}/ — src/son/legacy/meshes STL 을 mm 그대로
+# 변환한 것. 치수 메타는 son 정본을 공유한다
+_ASSETS = Path(__file__).resolve().parents[1] / "assets"
+_WS = Path(__file__).resolve().parents[4]
+META = json.loads((_WS / "src/son/spec/parts_meta.json").read_text())
+
+
+def _asset(usd_name):
+    sub = "pipe" if usd_name.startswith("pipe_") else "robot"
+    return str(_ASSETS / sub / usd_name)
 MM = 0.001                       # 부품 USD 는 mm 단위 (STL 과 동일 수치 확인)
 
 SEG_CENTER = META["seg_center_offset"] * MM      # ±44mm
@@ -67,7 +75,7 @@ def place(path, usd_name, scale=MM, rots=(), translate=(0, 0, 0)):
     t = Gf.Matrix4d(1.0)
     t.SetTranslate(Gf.Vec3d(*translate))
     xf.AddTransformOp().Set(m * t)
-    xf.GetPrim().GetReferences().AddReference(str(SRC / usd_name))
+    xf.GetPrim().GetReferences().AddReference(_asset(usd_name))
     return xf
 
 

@@ -1,0 +1,30 @@
+<!doctype html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>pipe_comm 관제 — __NS__</title>
+<link rel="stylesheet" href="/static/panel.css">
+<!-- three.js 는 CDN 이 아니라 /static 벤더 사본이다 — 현장망(오프라인)에서도
+     떠야 한다. 갱신은 파일 교체로 한다 (three@0.160.1). -->
+<script type="importmap">{"imports":{"three":"/static/three.module.min.js"}}</script>
+</head><body>
+
+<!-- 사이드바 — 항목은 app.js 의 ROUTES 가 채운다(서버 라우팅과 한 곳에서
+     맞추기 위해). 여기서는 뼈대만 둔다. -->
+<nav id="side">
+ <div class="brand">
+  <div class="brand-t">pipe_comm 관제</div>
+  <div class="brand-s" id="brand-ns">__NS__</div>
+ </div>
+ <ul id="nav"></ul>
+ <div id="conn" class="conn off">연결 대기…</div>
+</nav>
+
+<main id="main">
+ <header id="head">
+  <h1 id="page-title">Home</h1>
+  <div id="head-state" class="hstate">상태 수신 대기…</div>
+ </header>
+ <div id="view"></div>
+</main>
+
+<script type="module" src="/static/app.js"></script>
+</body></html>

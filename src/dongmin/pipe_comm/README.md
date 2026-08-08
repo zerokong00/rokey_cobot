@@ -8,7 +8,9 @@ pipe_comm/
 ├─ image_codec.py     영상 인코딩/디코딩 (cv_bridge 없이)
 ├─ camera_monitor.py  카메라가 오는지 검증하는 노드
 ├─ drive_monitor.py   주행/정지 알림을 보는 노드 (로봇 여러 대 동시)
-└─ mission_cli.py     출발·정지·복귀 지령을 쏘는 CLI
+├─ mission_cli.py     출발·정지·복귀 지령을 쏘는 CLI
+├─ web_view.py        브라우저 카메라 뷰 (zero-dep 진단용, 웹소켓)
+└─ web_panel.py       시연용 관제 패널 — 버튼·속도·지도·결함 목록 (FastAPI)
 ```
 
 ---
@@ -64,12 +66,14 @@ rosidl 이 만든 3.10 용 `.so` 에 묶여 있어 Isaac 쪽에서 못 쓴다. I
 | `depth` | `Image` 32FC1(m) | 원본 정밀도. **선택** | 10Hz |
 | `camera_info` | `CameraInfo` | 어안 f 를 `K[0]` 에 | 10Hz |
 | `rear/rgb/compressed` | `CompressedImage` | 후방 카메라 | 10Hz |
+| `torch/rgb/compressed` | `CompressedImage` | 토치 카메라(용접부 근접) | 10Hz |
 | `odom` | `Odometry` | **`pose.position.x` = 중심선 호길이** | 10Hz |
 | `imu` | `Imu` | 롤(결함 시계각 기준)·요 각속도 | 50Hz |
 | `joint_states` | `JointState` | 휠 12 + 피스톤 6 | 10Hz |
 | `moving` | `Bool` | 주행 중인가 — **주행/정지 알림** | 전환 시 |
 | `drive_state` | `String` JSON | FSM 상태 전체 | 10Hz |
 | `event` | `String` JSON | 1회성 사건 | 사건 시 |
+| `course` | `String` JSON | 코스 중심선 표본 — **latched** | 기동 시 1회 |
 
 ### ROS 노드 → Isaac (받는 데이터)
 
@@ -90,6 +94,12 @@ rosidl 이 만든 3.10 용 `.so` 에 묶여 있어 Isaac 쪽에서 못 쓴다. I
 // event — 사건 때만. alert=true 면 사람이 바로 봐야 한다
 {"stamp":1.23,"robot":"tee","event":"STUCK","s_mm":431.2,
  "detail":"방향 전환 → 후진","alert":true}
+
+// course — 기동 시 1회, latched(TRANSIENT_LOCAL). 웹 3D 맵이 이걸로 관을
+// 그린다. pts 는 [호길이 s, x, y, z] 이고 **전부 m**, s 오름차순(간격 불균일
+// 허용). 좌표계는 drive_state 의 pos_m 과 같은 월드다.
+{"stamp":1.23,"robot":"robot","ir_m":0.05,"bend_r_m":0.15,"s_total_m":2.5331,
+ "pts":[[0.0,0.33,0.85,0.335],[0.02,0.33,0.85,0.315], ...]}
 
 // mission
 {"stamp":1.23,"cmd":"SPEED","reason":"곡관 진입","mps":0.05}
@@ -121,12 +131,49 @@ rosidl 이 만든 3.10 용 `.so` 에 묶여 있어 Isaac 쪽에서 못 쓴다. I
 
 ---
 
+## 설치 — 받아서 바로 돌리기
+
+**이 패키지는 `src/dongmin/` 만 받으면 된다.** 다른 팀원 코드에 의존하지
+않고, 커스텀 인터페이스도 없어서 이 패키지 하나만 빌드하면 끝난다.
+
+### 처음 한 번
+
+```bash
+# 0) 의존성 (한 번만)
+sudo apt install -y python3-opencv python3-numpy
+
+# 1) 받기 — 이미 워크스페이스가 있으면
+cd ~/cobot3_ws && git pull
+
+#    없으면 새로 만든다
+mkdir -p ~/cobot3_ws/src && cd ~/cobot3_ws
+git clone <레포주소> _repo && cp -r _repo/src/dongmin src/ && rm -rf _repo
+
+# 2) 빌드
+source /opt/ros/humble/setup.bash
+colcon build --packages-select pipe_comm
+
+# 3) 환경 — 🚨 이 두 줄을 `~/.bashrc` 에 넣어 둘 것
+echo 'export ROS_DOMAIN_ID=143'                 >> ~/.bashrc
+echo 'export RMW_IMPLEMENTATION=rmw_fastrtps_cpp' >> ~/.bashrc
+```
+
+### 매번
+
+```bash
+source /opt/ros/humble/setup.bash
+source ~/cobot3_ws/install/setup.bash
+```
+
+🔑 **환경변수를 안 맞춰도 노드는 멀쩡히 뜬다.** 그래서 각 노드가 기동할 때
+`ROS_DOMAIN_ID` / `RMW_IMPLEMENTATION` 을 스스로 점검해 **`[환경]` 으로 찍는다**
+— 첫 줄에 빨간 글씨가 없으면 통과다.
+
+---
+
 ## 실행
 
 ```bash
-ros_set                                   # ROS 2 소싱 (python 3.10)
-export ROS_DOMAIN_ID=143
-
 # 카메라가 오는지
 ros2 run pipe_comm camera_monitor --ros-args -p ns:=elbow_v
 
@@ -141,6 +188,49 @@ ros2 run pipe_comm mission_cli -- STOP --ns elbow_v
 ros2 run pipe_comm mission_cli -- SPEED --mps 0.05 --ns all
 ```
 
+로봇이 한 대인 시연(`repair_demo.py` / `real_map_demo.py`)이면 `ns` 를 생략한다
+(기본 `/robot`).
+
+### 관제 패널 (시연용)
+
+```bash
+pip install fastapi uvicorn websockets     # 🚨 web_panel 만 필요로 한다 (한 번만)
+ros2 run pipe_comm web_panel --ros-args -p ns:=robot -p port:=8080
+```
+
+왼쪽 사이드바로 페이지를 오간다 — 주소도 같이 바뀐다(`<IP>:8080/camera`).
+
+| 페이지 | 주소 | 내용 |
+|---|---|---|
+| Home | `/home` | 상태·진행률·결함 수·최근 사건·전방 카메라 요약 |
+| Camera | `/camera` | 전방·후방·토치 3대 |
+| Robot Handling | `/handling` | 시작·정지·복귀·끼임탈출·비상정지, 속도 |
+| 3D Map | `/map` | 배관 맵 + 로봇 위치 + 결함/수리 마커 |
+| Detect List | `/detect` | 결함 리포트 표 |
+| Event Log | `/events` | 사건 로그 (경고만 보기) |
+
+**페이지 소스는 워크스페이스의 `web/`** 에 있다 (HTML/CSS/JS + three.js 벤더
+사본 — `web/README.md` 참조). web_panel 은 그 디렉터리를 설치본보다 먼저
+잡으므로 **HTML/JS 수정은 재빌드 없이 새로고침**으로 반영된다.
+
+🔑 라우팅은 브라우저가 하고 **웹소켓은 페이지 전환에도 안 끊긴다.** 대신
+경로 목록이 `web/app.js` 의 `ROUTES` 와 `web_panel.py` 두 곳에 있으니 페이지를
+추가하면 둘 다 고칠 것(한쪽만 고치면 새로고침에서만 404 가 난다).
+
+**코스 기하는 하드코딩하지 않는다.** 시연이 기동할 때 `course` 토픽
+(latched)으로 중심선 표본을 발행하고 패널이 그걸로 관을 그린다 — 단일 출처는
+시연 쪽 `CenterLine` 이라 맵이 바뀌면 시연만 고치면 된다. 🚨 시연을 `--ros`
+없이 띄우면 코스도 카메라도 안 온다 (페이지에 "코스 수신 대기" 로 뜬다).
+
+3D 맵의 **CAD 메시**: `tools/usd_to_webmesh.py` 로 맵 USD 를 `.webmesh` 로
+구워 두면(도구 docstring 에 실행법 — pxr 때문에 Isaac 파이썬 전용) web_panel
+이 자동으로 찾아 `/mesh` 로 서빙하고, 페이지가 전체 맵(벽은 옅게, 배관은 층별
+색)을 그린다. 파일이 없으면 코스 튜브만으로 그대로 돈다. 경로 지정은
+`-p mesh:=<파일>`.
+
+🚨 `web_view` 와 기본 포트(8080)가 같다 — 둘 중 하나만 띄우거나 `-p port:=` 로
+가른다. 지령 버튼이 있으니 공인망에 열지 말 것 (본인 IP /32 또는 SSH 터널).
+
 `mission_cli` 는 발행 뒤 **구독자 수를 확인하고 0 이면 0 이 아닌 종료코드**를
 낸다 — RELIABLE 이라도 구독자가 없으면 지령은 그냥 사라지기 때문이다(latch 가
 아니다). 스크립트에서 `&&` 로 이어 쓸 수 있다.
@@ -149,12 +239,23 @@ ros2 run pipe_comm mission_cli -- SPEED --mps 0.05 --ns all
 
 ## 오프라인 검증
 
-ROS 없이 `python3 -m pytest test/` 로 돈다 (18항목).
+ROS 없이 돈다 (18항목).
+
+```bash
+cd src/dongmin/pipe_comm
+PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest test -q
+```
 
 ```
 test_contract.py     토픽 이름·JSON 스키마·모르는 값 거부
 test_image_codec.py  RGB 채널 순서, 알파 제거, 깊이 무효/오버플로 처리
 ```
+
+🚨 **`PYTEST_DISABLE_PLUGIN_AUTOLOAD=1` 을 붙이는 이유** — ROS 를 소싱한
+셸에서는 ament 의 pytest 플러그인이 자동으로 로드되는데, Humble 이 기대하는
+pytest 버전보다 새 pytest 가 깔려 있으면 훅 시그니처가 안 맞아 **수집 단계에서
+통째로 죽는다**(`pytest_pycollect_makemodule(path, parent)` 오류). 시험 코드
+문제가 아니다. 플러그인 자동로드만 끄면 어느 버전에서도 돈다.
 
 🔑 규약이 깨지는 것은 **런타임에 침묵으로** 나타난다(토픽 오타 → 아무도 못
 받음, 깊이 무효 처리 실패 → 판정이 조용히 뒤집힘). 그래서 여기서 미리 건다.
