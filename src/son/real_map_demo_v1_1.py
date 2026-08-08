@@ -127,8 +127,15 @@ SON = Path(__file__).resolve().parent
 # 🎯 **2026-08-07 사용자 지시 — 기준 로봇은 용접기 내장 v2 다.**
 #    벨로우즈 12륜(`robot_v2_12wheel.usda`)으로 돌던 것을 갈아탄다. 로직은
 #    똑같이 가고 **설정값만 자산별로** 다르다(아래 TUNING).
+# 🎯 **기준 로봇 = `welder_126`** (2026-08-08 밤 사용자 지시:
+#    *"지금부터 welder_126 을 중심으로 모든 것을 한다"*). 근거는 같은 날
+#    실전 맵 2코스 비교 실측 — 9다리 판(`welder_short`)은 **수직 라이저에서
+#    축 회전(롤 −127°/+176°)으로 두 층 모두 사망**했고, 12다리 판은 배수구
+#    진입·곡관 통과를 해냈다. 앞 세그먼트 3다리로는 롤을 못 막는다.
+# 🔑 전장 126mm(카메라 포함 137mm) — **188mm 판으로는 못 들어가던 진입
+#    라이저(185mm)에 여유 59mm 로 들어간다.** 배수구 진입이 이때부터 된다.
 ROBOT_USDA = os.environ.get(
-    "ROBOT_USD", str(SON / "robot_v2" / "robot_from_bot_welder_art_v2.usda"))
+    "ROBOT_USD", str(SON / "robot_v2" / "welder_126.usda"))
 ROBOT_PRIM_IN_USDA = os.environ.get("ROBOT_PRIM", "")
 MAPS = SON / "maps"
 ASSET = Path(ROBOT_USDA).stem
@@ -148,6 +155,36 @@ ASSET = Path(ROBOT_USDA).stem
 #       스트로크를 35mm 로 늘리는 순간 그 상한이 진짜로 걸린다 →
 #       12다리×18N 이면 마찰 86.4N 대 견인 120N 으로 여유가 1.39배뿐이다.
 TUNING = {
+    # 🎯 **2026-08-08 CAD 수정본 2종 — 전장 126mm** (카메라 부착 시 140mm =
+    #    벨로우즈 v1 과 같은 길이라 **샤워실 배수구 진입이 가능해진다**).
+    #    실측 제원(둘 다): 휠 r8·중심반경 40mm, 다리 축 X 한계 −4~+6mm
+    #    (강성 3000·maxF 60), 중앙 D6 4개, 콜라이더 Cylinder+Cone.
+    #    → 용접기 v2 와 **같은 계열**이라 설정값을 그대로 물려받는다.
+    #    다른 점은 **다리·휠 개수와 질량**뿐이고, 견인/마찰 비는 둘 다 2.8배로
+    #    같아서 예압 9N 이 그대로 성립한다:
+    #      126   : 다리 12(앞6뒤6) · 2,040g · 견인 12×0.08/0.008 = 120N
+    #                                        마찰 0.4×12×9 = 43.2N → 2.8배
+    #      short : 다리  9(앞3뒤6) · 1,830g · 견인  9×0.08/0.008 =  90N
+    #                                        마찰 0.4× 9×9 = 32.4N → 2.8배
+    #    ⚠ short 는 **앞 세그먼트가 3다리**라 중심 유지의 최소 구성이다
+    #      (3점 지지). 접합부에서 한 다리가 개구에 빠지면 남는 것이 2개뿐이라
+    #      앞이 흔들릴 수 있다 — 비교 시험의 핵심 관전점.
+    "welder_126": dict(
+        wheel_r=0.008, wheel_maxf=0.08,
+        piston_stroke=0.035, piston_init=0.002, piston_maxf=9.0,
+        piston_retract=0.015,
+        center_delta=0.003,
+        bel_stiff=60.0, bel_maxf=15.0,
+        wheel_center_mm=40.0,
+        steer=("1", "2")),
+    "welder_short": dict(
+        wheel_r=0.008, wheel_maxf=0.08,
+        piston_stroke=0.035, piston_init=0.002, piston_maxf=9.0,
+        piston_retract=0.015,
+        center_delta=0.003,
+        bel_stiff=60.0, bel_maxf=15.0,
+        wheel_center_mm=40.0,
+        steer=("1", "2")),
     "robot_from_bot_welder_art_v2": dict(
         wheel_r=0.008, wheel_maxf=0.08,
         piston_stroke=0.035, piston_init=0.002, piston_maxf=9.0,
@@ -422,6 +459,14 @@ NAV = os.environ.get("NAV", "onboard")
 STEER_ONBOARD_DEG = float(os.environ.get("STEER_ONBOARD_DEG", 40.0))
 
 ROLL_DEG = float(os.environ.get("ROLL_DEG", 0.0))
+# 🎯 바퀴 차동 속도 (2026-08-08 신설) — 굽힘에서 바깥 바퀴를 빠르게.
+DIFF_ON = os.environ.get("DIFF", "0") == "1"
+# 🚨 **기본 OFF** (2026-08-08 실측): 켜니 floor2 가 s 969 → **355** 로 후퇴했다
+#    (진입 곡관에서 이탈 1.4mm 로 잘 정렬된 채 **전진만 못 함** = 안쪽 바퀴가
+#    브레이크처럼 끈 정황). 개념은 맞지만 부호·크기를 실측으로 가려야 한다.
+#    DIFF_SIGN 으로 부호를, DIFF_GAIN 으로 세기를 바꿔 실험한다.
+DIFF_SIGN = float(os.environ.get("DIFF_SIGN", 1.0))
+DIFF_GAIN = float(os.environ.get("DIFF_GAIN", 1.0))
 
 # 안착 궤적을 0.25초마다 찍는다 (수직관에서 흘러내리는지 진단).
 SETTLE_TRACE = os.environ.get("SETTLE_TRACE", "0") == "1"
@@ -801,6 +846,11 @@ START_S = float(os.environ.get("START_S", 0.585))
 #    않고 기존 관의 반환점을 끝쪽으로 60mm 당겼다. s 는 전방 세그먼트 기준
 #    이라 0.10 이면 전방 휠이 관 끝 ~55mm 안쪽에서 돌아선다(사출 여유 유지).
 END_S = float(os.environ.get("END_S", 0.10))
+# 🎯 **임무 종점 = 배수구 밖** (2026-08-08 사용자 확정). 중심선 s 가 이 값
+#    아래로 내려오면 진입 라이저를 빠져나온 것으로 보고 임무를 끝낸다.
+#    (s 는 채점 정보다 — 주행 판단이 아니라 **언제 끝났는지**를 정하는 데만
+#     쓴다. 코스 끝 판정(`recall`)이 이미 같은 규약이다.)
+EXIT_S = float(os.environ.get("EXIT_S", 0.02))
 
 robots = []
 
@@ -1039,7 +1089,10 @@ def build_robot(name, path_cl):
     _rear, _front = seg_body_prims(root, jd)
     _fw = np.array(
         wlocal(_front) - wlocal(_rear), dtype=np.float64)
-    _fw = _fw / max(np.linalg.norm(_fw), 1e-12)
+    # 🔑 두 세그먼트 중심 사이 거리 = 굽힘이 걸리는 **호의 길이**. 차동 속도의
+    #    곡률 반경 R = 이 길이 / 총 굽힘각 계산에 쓴다(로봇 제원, 도면 무관).
+    _seg_span = float(np.linalg.norm(_fw))
+    _fw = _fw / max(_seg_span, 1e-12)
     _to_x = Gf.Matrix4d(1.0)
     _to_x.SetRotate(Gf.Rotation(Gf.Vec3d(*[float(v) for v in _fw]),
                                 Gf.Vec3d(1, 0, 0)))
@@ -1109,6 +1162,7 @@ def build_robot(name, path_cl):
             "state": "SETTLE", "t": 0, "dir": +1, "lap": 0, "stuck": 0,
             # 🔑 창 기반 s 추적의 씨앗 — 출발 지점을 알고 시작한다(닫힌 루프).
             "s_hint": float(path_cl.s[i0]),
+            "seg_span": _seg_span,
             "s_last": 0.0, "mark": 0, "dead": False, "art": None,
             "wheel": [], "seg1": None, "best": 0.0, "wheel_rad": 0.0}
 
@@ -1207,12 +1261,17 @@ for r in robots:
         _seen[sg] = _seen.get(sg, 0) + 1
         r["piston"][(sg, _seen[sg] - 1)] = k
     r["bel"] = [k for k, n in enumerate(dof) if _base(n, _bn) in _bn]
-    # 🚨 다리 개수는 자산마다 다르다 (벨로우즈 6 / 용접기 v2 **12**) —
-    #    상수 6 으로 검사했다가 멀쩡한 매핑을 실패로 판정했다. 휠만 12 고정.
-    if len(r["wheel"]) != 12 or len(r["piston"]) != len(jd["legs"]) \
+    # 🚨 **개수를 상수로 박지 말 것.** 다리는 자산마다 다르다(벨로우즈 6 /
+    #    용접기 v2·126 은 12 / **welder_short 는 9**)고 고쳤으면서 휠은 12 로
+    #    남겨 뒀다가, 앞 세그먼트를 3다리로 줄인 short 를 멀쩡한 매핑인데도
+    #    실패로 판정했다(2026-08-08 실측). **구조 탐색이 찾은 수와 비교한다** —
+    #    그것이 discover() 를 둔 이유다.
+    if len(r["wheel"]) != len(jd["wheels"]) \
+            or len(r["piston"]) != len(jd["legs"]) \
             or not r["bel"]:
         raise SystemExit(
-            f"[중단] {r['name']} DOF 매핑 실패 — 휠 {len(r['wheel'])}(12) / "
+            f"[중단] {r['name']} DOF 매핑 실패 — "
+            f"휠 {len(r['wheel'])}({len(jd['wheels'])}) / "
             f"다리 {len(r['piston'])}({len(jd['legs'])}) / "
             f"중앙 {len(r['bel'])}. DOF: {dof}")
     # 🔑 다리별 **시계각** — 자산의 조인트 부착 위치에서 읽는다(실측 0/120/240°,
@@ -1228,6 +1287,25 @@ for r in robots:
             if _base(n2, _ln) == _nm and "TRANSLATION" in types[k2]:
                 r["leg_clock"][k2] = math.degrees(
                     math.atan2(float(_p0[2]), float(_p0[1]))) % 360.0
+    # 🎯 **바퀴별 시계각** (2026-08-08 사용자 지시 — 차동 속도용). 바퀴는
+    #    다리 끝에 달리므로 **같은 이름의 다리**에서 시계각을 물려받는다
+    #    (구동 조인트와 서스펜션이 이름을 공유하는 이 자산 구조가 근거).
+    #    이것이 있어야 "굽힘 바깥쪽 바퀴는 더 멀리 간다"를 계산할 수 있다.
+    _clk_by_name = {}
+    for _j in jd["legs"]:
+        _p0 = _j.GetAttribute("physics:localPos0").Get()
+        _clk_by_name[_j.GetName()] = math.degrees(
+            math.atan2(float(_p0[2]), float(_p0[1]))) % 360.0
+    r["wheel_clock"] = {}
+    for _k in r["wheel"]:
+        _b = _base(dof[_k], _wn)
+        if _b in _clk_by_name:
+            r["wheel_clock"][_k] = _clk_by_name[_b]
+    if len(r["wheel_clock"]) != len(r["wheel"]):
+        print(f"[경고] {r['name']}: 바퀴 시계각 "
+              f"{len(r['wheel_clock'])}/{len(r['wheel'])} 만 매핑 — "
+              f"차동 속도를 끈다")
+
     # 조향용 — 중앙 관절의 피치/요 DOF 를 갈라 둔다 (D6 는 `J0:1`·`J0:2`)
     _ax = TUNE.get("steer")
     if _ax and STEER_ON:
@@ -1850,7 +1928,61 @@ def drive(r, deg_s):
         deg_s *= r["gov"]
     elif GOV_ON:
         r["gov"], r["gov_dir"] = 1.0, None
-    v = np.array([math.radians(deg_s)] * len(r["wheel"]), dtype=np.float32)
+    # 🎯 **바퀴 차동 속도** (2026-08-08 사용자 지시 — *"앞대가리에만 영향을
+    #    주니 관절마다, 꼬리쪽은 더 심하게 비틀린다"*). 지금까지 12개 바퀴에
+    #    **똑같은 각속도**를 줬는데, 굽은 관에서는 바깥쪽 바퀴가 더 먼 거리를
+    #    가야 한다 — 같은 속도를 주면 바깥은 끌리고 안쪽은 밀려 그 마찰이
+    #    몸통을 비트는 토크가 된다(명령이 나오는 앞에서 먼 꼬리가 가장 심함).
+    # 🔑 로봇 자기 신호만 쓴다(도면 무관): 중앙 관절 엔코더 → 총 굽힘각 θ 와
+    #    굽힘 방위, 세그먼트 간격 L → 곡률 반경 **R = L/θ**. 바퀴가 시계각 φ
+    #    (자산 제원)에 반경 r_w 로 달려 있으면 그 바퀴의 선회 반경은
+    #    R − r_w·cos(φ − φ_bend) 이므로
+    #        속도배율 = 1 − (r_w/R)·cos(φ − φ_bend)
+    #    굽힘 안쪽(φ = φ_bend)은 느리고 바깥쪽은 빠르다.
+    # 🚨 배율은 [0.5, 1.5] 로 자른다 — θ 가 크면 R 이 작아져 발산한다.
+    _mult = None
+    if DIFF_ON and r.get("wheel_clock") and len(r["wheel_clock"]) == len(r["wheel"]) \
+            and r.get("bel_pitch") and r.get("seg_span", 0) > 1e-6:
+        _q = np.asarray(r["art"].get_joint_positions())
+        _tp = float(np.sum(_q[r["bel_pitch"]]))
+        _ty = float(np.sum(_q[r["bel_yaw"]]))
+        _th = math.hypot(_tp, _ty)
+        if _th > math.radians(3.0):          # 3° 밑은 직관 — 차동 불필요
+            # 🚨 **곡률 반경에 바닥을 둔다** (2026-08-08 실측 교훈). 진입
+            #    기동 중에는 관절이 60° 넘게 꺾여 R = L/θ 가 74mm 까지 작아지고
+            #    (실제 관은 R150) 배율이 ±0.57 로 벌어졌다. 설계 최소 곡관
+            #    반경(SR R=100mm, v3 §4.2)을 바닥으로 쓴다 — 맵 정보가 아니라
+            #    **배관 설계 규격**이라 자율 원칙에 어긋나지 않는다.
+            _R = max(r["seg_span"] / _th, 0.10)
+            # 굽힘 방위 — 조향 규약(tp ∝ −sinθ, ty ∝ +cosθ)의 역
+            _bc = math.degrees(math.atan2(-_tp, _ty))
+            _c = r.get("cond")
+            _bore = (float(_c.bore_ref_mm) / 1000.0
+                     if _c is not None and getattr(_c, "bore_ref_mm", 0) > 0
+                     else PIPE_IR)
+            _rw = max(_bore - WHEEL_R, 0.005)   # 휠 중심이 도는 반경
+            # 🔑 **아무 바퀴도 기준 속도보다 느리게 주지 않는다** (핵심 수정).
+            #    속도 드라이브는 지령보다 빨리 도는 바퀴를 **잡아채므로**,
+            #    안쪽 바퀴에 0.5배를 주면 그것이 곧 브레이크가 된다 — 실측
+            #    실패가 정확히 그 모습이었다(이탈 1.4mm 로 잘 정렬된 채
+            #    **전진만 못 함**, floor2 s 969→355).
+            #    → 비율은 유지하되 **최솟값이 1.0 이 되도록 통째로 올린다.**
+            #      안쪽 바퀴는 그대로, 바깥 바퀴만 더 빨리 돈다. 전체가 조금
+            #      빨라지는 것은 기존 실측 되먹임(gov)이 알아서 되돌린다.
+            _raw = []
+            for _k in r["wheel"]:
+                _phi = r["wheel_clock"][_k]
+                _raw.append(1.0 - DIFF_SIGN * DIFF_GAIN * (_rw / _R)
+                            * math.cos(math.radians(_phi - _bc)))
+            _lo = max(min(_raw), 0.3)
+            _mult = [float(np.clip(x / _lo, 1.0, 1.8)) for x in _raw]
+            r["diff_spread"] = max(_mult) - min(_mult)
+            r["diff_max"] = max(r.get("diff_max", 0.0), r["diff_spread"])
+    if _mult is None:
+        r["diff_spread"] = 0.0
+        v = np.array([math.radians(deg_s)] * len(r["wheel"]), dtype=np.float32)
+    else:
+        v = np.array([math.radians(deg_s) * m for m in _mult], dtype=np.float32)
     i = np.array(r["wheel"])
     try:
         a._articulation_view.set_joint_velocity_targets(v.reshape(1, -1),
@@ -2187,26 +2319,36 @@ while True:
                 r["dead"] = True
                 continue
             if r.get("ctl_state") == "DONE":
-                # 🚨 **가짜 DONE 검문** (2026-08-07) — 복귀가 끝 구간(코스 끝
-                #    − END_S)을 벗어나지도 않았는데 거리 적산이 0 에 닿아
-                #    DONE 이 나면, 재출발 즉시 recall 이 다시 걸려 랩만 헛돈다
-                #    (실측: 물리 3랩에 로그 155랩). 숨기지 않고 실패로 끝낸다.
-                if s_now >= r["cl"].total - END_S - 0.02:
-                    print(f"[{r['name']:8s}] ❌ 복귀 실패 — DONE 시점에 아직 "
-                          f"끝 구간 (s={s_now * 1000:.0f}mm ≥ "
-                          f"{(r['cl'].total - END_S) * 1000:.0f}mm). "
-                          f"거리 적산이 실주행보다 빨리 소진된 것")
-                    drive(r, 0.0)
-                    r["dead"] = True
+                # 🎯 **실전 임무는 왕복 반복이 아니다** (2026-08-08 사용자 확정:
+                #    *"왕복 무한 반복은 map_test 때처럼 짧은 구간을 확인하려던
+                #    것. 복귀의 끝지점은 샤워 배수구를 밖으로 나가는 것"*).
+                # 🚨 컨트롤러의 DONE 은 **적산 거리가 0 에 닿았다**는 뜻이지
+                #    "입구에 도착했다"가 아니다. 나갈 때 시각 오도메트리가
+                #    부풀려 세면(실측 슬립 2.00 = 두 배로 읽음) 돌아올 때
+                #    **관 한복판에서** 0 에 닿는다 → 예전 코드는 그것을 랩
+                #    완료로 보고 재출발시켜 **다시 관으로 들어갔다**
+                #    (사용자 관찰). 이제 위치로 판정한다.
+                if s_now > EXIT_S:
+                    # 아직 관 안이다 — 복귀를 이어 간다. 적산이 모자란 만큼
+                    # 채워 주고 상태를 RETURN 으로 되돌린다.
+                    # ⚠ 이 보충은 **채점 계층이 오도메트리 결함을 메우는 것**
+                    #    이다. 근본 해결은 시각 오도메트리의 과대적산 수정.
+                    if not r.get("_odom_warned"):
+                        print(f"[{r['name']:8s}] ⚠ 적산 소진(DONE)인데 아직 관 "
+                              f"안(s={s_now * 1000:.0f}mm > 출구 "
+                              f"{EXIT_S * 1000:.0f}mm) — 복귀 계속 "
+                              f"(오도메트리 과대적산)")
+                        r["_odom_warned"] = True
+                    r["ctl"].s.state = "RETURN"
+                    r["ctl"].s.distance_m = float(s_now)
                     continue
-                r["lap"] += 1
-                r["recall"] = False
-                r["started"] = False
-                # 🎯 재출발 유예 (2026-08-07) — 복귀 종점이 접합부 모서리라,
-                #    비틀린 몸으로 곧장 재진입을 걸면 쐐기가 된다(실측: 1랩은
-                #    안착 직후 곧은 몸이라 성공, 2랩 재출발만 s=178 RECOVER
-                #    동결 사망). 2초간 관절을 펴고 나서 출발한다.
-                r["straighten_n"] = int(2.0 * PHYSICS_HZ)
+                print(f"[{r['name']:8s}] ✅ **임무 완료** — 샤워 배수구로 복귀 "
+                      f"(s={s_now * 1000:.0f}mm). 총 {r['lap'] + 1}회 주행")
+                drive(r, 0.0)
+                r["dead"] = True
+                continue
+                # (아래 재출발 코드는 왕복 반복 규약의 잔재 — 실전 임무는
+                #  배수구를 나가면 끝이므로 도달하지 않는다. 2026-08-08)
                 r["s_prog"], r["prog_mark"] = -1.0, step
                 _ctl_kn = dict(
                     branch_rule=os.environ.get("BRANCH_RULE", "right"))

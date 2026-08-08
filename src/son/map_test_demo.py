@@ -134,8 +134,15 @@ SON = Path(__file__).resolve().parent
 # 🎯 **2026-08-07 사용자 지시 — 기준 로봇은 용접기 내장 v2 다.**
 #    벨로우즈 12륜(`robot_v2_12wheel.usda`)으로 돌던 것을 갈아탄다. 로직은
 #    똑같이 가고 **설정값만 자산별로** 다르다(아래 TUNING).
+# 🎯 **기준 로봇 = `welder_126`** (2026-08-08 밤 사용자 지시:
+#    *"지금부터 welder_126 을 중심으로 모든 것을 한다"*). 근거는 같은 날
+#    실전 맵 2코스 비교 실측 — 9다리 판(`welder_short`)은 **수직 라이저에서
+#    축 회전(롤 −127°/+176°)으로 두 층 모두 사망**했고, 12다리 판은 배수구
+#    진입·곡관 통과를 해냈다. 앞 세그먼트 3다리로는 롤을 못 막는다.
+# 🔑 전장 126mm(카메라 포함 137mm) — **188mm 판으로는 못 들어가던 진입
+#    라이저(185mm)에 여유 59mm 로 들어간다.** 배수구 진입이 이때부터 된다.
 ROBOT_USDA = os.environ.get(
-    "ROBOT_USD", str(SON / "robot_v2" / "robot_from_bot_welder_art_v2.usda"))
+    "ROBOT_USD", str(SON / "robot_v2" / "welder_126.usda"))
 ROBOT_PRIM_IN_USDA = os.environ.get("ROBOT_PRIM", "")
 MAPS = SON / "maps"
 ASSET = Path(ROBOT_USDA).stem
@@ -155,6 +162,36 @@ ASSET = Path(ROBOT_USDA).stem
 #       스트로크를 35mm 로 늘리는 순간 그 상한이 진짜로 걸린다 →
 #       12다리×18N 이면 마찰 86.4N 대 견인 120N 으로 여유가 1.39배뿐이다.
 TUNING = {
+    # 🎯 **2026-08-08 CAD 수정본 2종 — 전장 126mm** (카메라 부착 시 140mm =
+    #    벨로우즈 v1 과 같은 길이라 **샤워실 배수구 진입이 가능해진다**).
+    #    실측 제원(둘 다): 휠 r8·중심반경 40mm, 다리 축 X 한계 −4~+6mm
+    #    (강성 3000·maxF 60), 중앙 D6 4개, 콜라이더 Cylinder+Cone.
+    #    → 용접기 v2 와 **같은 계열**이라 설정값을 그대로 물려받는다.
+    #    다른 점은 **다리·휠 개수와 질량**뿐이고, 견인/마찰 비는 둘 다 2.8배로
+    #    같아서 예압 9N 이 그대로 성립한다:
+    #      126   : 다리 12(앞6뒤6) · 2,040g · 견인 12×0.08/0.008 = 120N
+    #                                        마찰 0.4×12×9 = 43.2N → 2.8배
+    #      short : 다리  9(앞3뒤6) · 1,830g · 견인  9×0.08/0.008 =  90N
+    #                                        마찰 0.4× 9×9 = 32.4N → 2.8배
+    #    ⚠ short 는 **앞 세그먼트가 3다리**라 중심 유지의 최소 구성이다
+    #      (3점 지지). 접합부에서 한 다리가 개구에 빠지면 남는 것이 2개뿐이라
+    #      앞이 흔들릴 수 있다 — 비교 시험의 핵심 관전점.
+    "welder_126": dict(
+        wheel_r=0.008, wheel_maxf=0.08,
+        piston_stroke=0.035, piston_init=0.002, piston_maxf=9.0,
+        piston_retract=0.015,
+        center_delta=0.003,
+        bel_stiff=60.0, bel_maxf=15.0,
+        wheel_center_mm=40.0,
+        steer=("1", "2")),
+    "welder_short": dict(
+        wheel_r=0.008, wheel_maxf=0.08,
+        piston_stroke=0.035, piston_init=0.002, piston_maxf=9.0,
+        piston_retract=0.015,
+        center_delta=0.003,
+        bel_stiff=60.0, bel_maxf=15.0,
+        wheel_center_mm=40.0,
+        steer=("1", "2")),
     "robot_from_bot_welder_art_v2": dict(
         wheel_r=0.008, wheel_maxf=0.08,
         piston_stroke=0.035, piston_init=0.002, piston_maxf=9.0,
@@ -1303,12 +1340,17 @@ for r in robots:
         _seen[sg] = _seen.get(sg, 0) + 1
         r["piston"][(sg, _seen[sg] - 1)] = k
     r["bel"] = [k for k, n in enumerate(dof) if _base(n, _bn) in _bn]
-    # 🚨 다리 개수는 자산마다 다르다 (벨로우즈 6 / 용접기 v2 **12**) —
-    #    상수 6 으로 검사했다가 멀쩡한 매핑을 실패로 판정했다. 휠만 12 고정.
-    if len(r["wheel"]) != 12 or len(r["piston"]) != len(jd["legs"]) \
+    # 🚨 **개수를 상수로 박지 말 것.** 다리는 자산마다 다르다(벨로우즈 6 /
+    #    용접기 v2·126 은 12 / **welder_short 는 9**)고 고쳤으면서 휠은 12 로
+    #    남겨 뒀다가, 앞 세그먼트를 3다리로 줄인 short 를 멀쩡한 매핑인데도
+    #    실패로 판정했다(2026-08-08 실측). **구조 탐색이 찾은 수와 비교한다** —
+    #    그것이 discover() 를 둔 이유다.
+    if len(r["wheel"]) != len(jd["wheels"]) \
+            or len(r["piston"]) != len(jd["legs"]) \
             or not r["bel"]:
         raise SystemExit(
-            f"[중단] {r['name']} DOF 매핑 실패 — 휠 {len(r['wheel'])}(12) / "
+            f"[중단] {r['name']} DOF 매핑 실패 — "
+            f"휠 {len(r['wheel'])}({len(jd['wheels'])}) / "
             f"다리 {len(r['piston'])}({len(jd['legs'])}) / "
             f"중앙 {len(r['bel'])}. DOF: {dof}")
     # 🔑 다리별 **시계각** — 자산의 조인트 부착 위치에서 읽는다(실측 0/120/240°,

@@ -721,11 +721,21 @@ class DriveController:
             #    지나면 관 밖으로 사출됐다(실측 낙하 25.9m).
             s.steer_deg = k["entry_bend_deg"]
             s.steer_clock_deg = self._entry_clock
-        elif (s.state in (CRUISE, SLOW) and cond is not None
+        elif (s.state in (CRUISE, SLOW, RETURN) and cond is not None
                 and cond.get("state") in ("NORMAL", "MISALIGNMENT",
                                           "BORE_CHANGE")
                 and float(cond.get("incidence_deg", 0.0))
                 > k["center_deadband_deg"]):
+            # 🎯 **복귀(RETURN) 중에도 센터링을 쓴다** (2026-08-08 사용자 지적:
+            #    *"복귀할 때 카메라를 사용 안 하는 구조인가? 왜 땅에 냅다
+            #    처박지?"*). vision 모드는 렌더 부하 때문에 **전방 카메라만**
+            #    만들어 후진 방향을 보는 눈이 없다. 그런데 전방 영상의 개구
+            #    중심은 **관 축**을 알려주므로 뒤로 갈 때도 몸을 관에 맞추는
+            #    데는 충분하다 — 조향은 진행 방향을 쫓는 것이 아니라 몸통
+            #    사슬을 관 모양에 맞추는 것이라 전진·후진이 같은 식이다.
+            #    실측 근거: floor2 복귀에서 조향이 없자 롤이 +3°→−54° 로
+            #    누적되며 자세가 무너졌다(입사각도 13°→51°).
+            #    ⚠ 진입 기동 구간(위 elif)은 래치한 굽힘이 우선이라 안 걸린다.
             # 🎯 센터링 — 개구부 중심(관 축)을 향해 코를 돌린다. 직관에서는
             #    정렬 유지(소이득), 곡관 접근(curve_ahead)에서는 진입 기동급
             #    이득으로 축이 휘는 쪽에 몸을 맞춘다.
