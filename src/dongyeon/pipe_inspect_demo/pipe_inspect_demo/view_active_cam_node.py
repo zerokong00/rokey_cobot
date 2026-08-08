@@ -1,49 +1,41 @@
-#!/usr/bin/env python3
-"""[ROS2 Humble, Python 3.10] real_map_demo.py 의 활성 카메라 스트림을 실시간으로 본다.
+"""real_map_demo.py(Isaac Sim)가 발행하는 활성 카메라 스트림을 실시간으로 본다.
 
-real_map_demo.py(Isaac Sim, Python 3.11)가 상태별로(전진→front_camera,
-후진→back_camera, 정렬~검증→torch_camera) 활성 카메라 영상을 압축 JPEG
-로 발행한다 — 이 스크립트는 그걸 구독해서 OpenCV 로 디코딩하고 화면에 띄운다.
-
-실행 (Isaac Sim 을 띄운 터미널과는 **별개의** 새 터미널에서):
-    source /opt/ros/humble/setup.bash
-    python3 tools/view_active_cam.py
+`integration_test/tools/view_active_cam.py`(패키지 없는 일반 스크립트)를
+`ros2 run`으로 돌릴 수 있게 이 패키지 노드로 옮긴 것 — 로직은 동일하다.
 
 구독 토픽
     /repair_robot/active_cam/rgb/compressed   sensor_msgs/CompressedImage
     /repair_robot/active_cam/which             std_msgs/String  (현재 활성 카메라 이름)
     /repair_robot/opencv_judgement/json        std_msgs/String  (아래 참고)
 
-창 하나에 active_cam 실시간 영상만 띄우고, 그 위에 OpenCV 판정을 **매 프레임
-그대로 겹쳐 그린다**. real_map_demo.py 가 front_camera 가 활성일 때마다
-(최대 10Hz) find_wall_hole/find_weld_bead 를 그 프레임에 대해 돌려 좌표·판정
-근거만 JSON 으로 발행하고(이미 렌더된 이미지가 아니다), 이 스크립트가 그
-좌표를 지금 들어오는 raw 프레임 위에 직접 그린다 — 그래서 판정이 나는
+창 하나에 active_cam 실시간 영상만 띄우고, 그 위에 OpenCV 판정을 **매
+프레임 그대로 겹쳐 그린다**. real_map_demo.py 가 front_camera 가 활성일
+때마다(최대 10Hz) find_wall_hole/find_weld_bead 를 그 프레임에 대해 돌려
+좌표·판정 근거만 JSON 으로 발행하고(이미 렌더된 이미지가 아니다), 이 노드가
+그 좌표를 지금 들어오는 raw 프레임 위에 직접 그린다 — 그래서 판정이 나는
 "순간의 정지 이미지"가 아니라 로봇이 결함에 다가가는 동안 원이 실시간으로
 따라온다. **표시 전용이다** — 결함을 실제로 등록·확정하는 시점은 지금도
-INSPECT/RECHECK/VERIFY 세 번뿐이고(real_map_demo.py::inspect_defect()), 이
-오버레이는 그 판정을 바꾸지 않는다.
+INSPECT/RECHECK/VERIFY 세 번뿐이고, 이 오버레이는 그 판정을 바꾸지 않는다.
 
-m 키 — 원본→엣지검출(Canny) 순환. q 또는 ESC 로 창을 닫아 종료한다.
+m 키 — 원본→엣지검출(Canny) 순환. q 또는 Esc 로 종료한다.
 
-OpenCV 처리를 더 추가하고 싶으면 `_process()` 함수에 모드를 하나 더
-넣으면 된다 — 그 시점에 `frame` 은 BGR uint8 numpy 배열(cv2 가 기대하는
-그대로의 순서)이다.
+실행:
+    ros2 run pipe_inspect_demo view_active_cam
 """
+
 import json
-import sys
 import time
 
 import cv2
 import numpy as np
 import rclpy
 from rclpy.node import Node
-from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
+from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import CompressedImage
 from std_msgs.msg import String
 
 MODES = ("raw", "edge")
-WINDOW_NAME = "repair_robot active_cam"
+WINDOW_NAME = "active_cam"
 PLACEHOLDER_H, PLACEHOLDER_W = 360, 640
 # opencv_judgement 가 이 시간 안에 들어온 것만 "지금 유효한 판정"으로 겹쳐
 # 그린다 — real_map_demo.py 가 front_camera 활성일 때만 최대 10Hz 로 계속
@@ -55,8 +47,7 @@ JUDGE_FRESH_S = 1.0
 def _placeholder(text, h=PLACEHOLDER_H, w=PLACEHOLDER_W):
     """프레임이 아직 안 온 쪽을 빈 화면 대신 안내 문구로 채운다."""
     img = np.zeros((h, w, 3), dtype=np.uint8)
-    cv2.putText(img, text, (20, h // 2), cv2.FONT_HERSHEY_SIMPLEX, 0.7,
-               (0, 255, 255), 2, cv2.LINE_AA)
+    cv2.putText(img, text, (20, h // 2), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2, cv2.LINE_AA)
     return img
 
 
@@ -143,97 +134,105 @@ def draw_judgement(frame_bgr, judgement):
     return img
 
 
-class ActiveCamViewer(Node):
-    """압축 이미지·활성 카메라 이름·OpenCV 판정을 받아 최신 상태만 들고 있는다."""
+class ActiveCamViewerNode(Node):
+    """active_cam 영상을 구독해 창 하나에 실시간 표시하고 OpenCV 판정을 겹쳐 그린다."""
 
     def __init__(self):
-        super().__init__("active_cam_viewer")
-        # 🚨 Isaac 쪽(ActiveCamBridge)과 같은 QoS 를 써야 한다 — RELIABLE 로
-        #    구독하면 BEST_EFFORT 발행자와 안 맞아 아무것도 안 들어온다.
-        qos = QoSProfile(reliability=ReliabilityPolicy.BEST_EFFORT,
-                         history=HistoryPolicy.KEEP_LAST, depth=1)
+        """토픽 parameter, 구독자, OpenCV 창을 초기화한다."""
+        super().__init__("view_active_cam")
+        defaults = {
+            "rgb_topic": "/repair_robot/active_cam/rgb/compressed",
+            "which_topic": "/repair_robot/active_cam/which",
+            "opencv_judgement_topic": "/repair_robot/opencv_judgement/json",
+        }
+        for name, value in defaults.items():
+            self.declare_parameter(name, value)
         self.which = "?"
-        self.frame = None          # BGR uint8, cv2.imshow 가 바로 받는 순서
+        self.frame = None
         self.n_frames = 0
-        self.judgement = None      # OpenCV 실시간 판정(dict) — front_camera 활성일 때만 갱신
+        self.judgement = None
         self.judgement_t = 0.0
         self.n_judgements = 0
-        self.create_subscription(String, "/repair_robot/active_cam/which",
-                                 self._on_which, qos)
-        self.create_subscription(CompressedImage,
-                                 "/repair_robot/active_cam/rgb/compressed",
-                                 self._on_image, qos)
-        self.create_subscription(String,
-                                 "/repair_robot/opencv_judgement/json",
-                                 self._on_judgement, qos)
+        self.mode_idx = 0
+        self.create_subscription(String, str(self.get_parameter("which_topic").value), self._on_which, qos_profile_sensor_data)
+        self.create_subscription(CompressedImage, str(self.get_parameter("rgb_topic").value), self._on_image, qos_profile_sensor_data)
+        self.create_subscription(String, str(self.get_parameter("opencv_judgement_topic").value), self._on_judgement, qos_profile_sensor_data)
+        cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_NORMAL)
+        self.create_timer(1.0 / 30.0, self._refresh_windows)
+        self.get_logger().info(f"active_cam 뷰어 시작 — m 키로 처리 모드 순환({' → '.join(MODES)}), q/Esc 로 종료")
 
-    def _on_which(self, msg):
-        self.which = msg.data
+    def _on_which(self, message):
+        """지금 active_cam 이 내보내는 카메라 이름(front/back/torch)을 기록한다."""
+        self.which = message.data
 
-    def _on_image(self, msg):
-        buf = np.frombuffer(msg.data, dtype=np.uint8)
+    def _on_image(self, message):
+        """active_cam 압축 RGB 를 디코딩해 최신 프레임으로 들고 있는다."""
+        buf = np.frombuffer(message.data, dtype=np.uint8)
         # Isaac 쪽이 BGR 로 뒤집어서 imencode 했으므로(camera/rig.py 와 같은
         # 관례) imdecode 결과도 그대로 BGR — cv2.imshow 에 바로 넣으면 된다.
         bgr = cv2.imdecode(buf, cv2.IMREAD_COLOR)
         if bgr is None:
+            self.get_logger().warn("active_cam 압축 영상을 디코딩할 수 없어.", throttle_duration_sec=5.0)
             return
         self.frame = bgr
         self.n_frames += 1
 
-    def _on_judgement(self, msg):
+    def _on_judgement(self, message):
+        """OpenCV(find_wall_hole/find_weld_bead) 실시간 판정 좌표를 받는다."""
         try:
-            self.judgement = json.loads(msg.data)
+            self.judgement = json.loads(message.data)
         except (ValueError, TypeError):
             return
         self.judgement_t = time.time()
         self.n_judgements += 1
 
+    def _refresh_windows(self):
+        """새 프레임 유무와 무관하게 창과 키 입력을 계속 처리한다."""
+        if self.frame is not None:
+            mode = MODES[self.mode_idx]
+            disp = _process(self.frame, mode)
+            label = f"{self.which}  #{self.n_frames}  [{mode}]"
+            color = (0, 255, 0)
+        else:
+            disp = _placeholder("waiting for active_cam...")
+            label = "waiting for active_cam"
+            color = (0, 255, 255)
 
-def main():
-    rclpy.init()
-    node = ActiveCamViewer()
-    print("구독 시작 — /repair_robot/active_cam/{rgb/compressed,which}, "
-         "/repair_robot/opencv_judgement/json")
-    print("Isaac Sim 쪽(real_map_demo.py)이 GUI 로 돌고 있어야 프레임이 온다.")
-    print(f"m 키 — 처리 모드 순환({' → '.join(MODES)}), q 또는 ESC — 종료")
-    mode_idx = 0
+        if self.judgement is not None and (time.time() - self.judgement_t) <= JUDGE_FRESH_S:
+            disp = draw_judgement(disp, self.judgement)
+            label += f"  [judged #{self.n_judgements}]"
+
+        cv2.putText(disp, label, (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2, cv2.LINE_AA)
+        cv2.imshow(WINDOW_NAME, disp)
+        key = cv2.waitKey(1) & 0xFF
+        if key in (27, ord("q")):
+            self.get_logger().info(f"종료 — 받은 프레임 {self.n_frames}개, 마지막 활성 카메라 '{self.which}'")
+            rclpy.shutdown()
+        elif key == ord("m"):
+            self.mode_idx = (self.mode_idx + 1) % len(MODES)
+
+    def close_windows(self):
+        """노드가 사용한 OpenCV 표시 창을 닫는다."""
+        cv2.destroyWindow(WINDOW_NAME)
+        cv2.waitKey(1)
+
+
+def main(args=None):
+    """ROS 2를 초기화하고 active_cam 뷰어를 종료할 때까지 실행한다."""
+    rclpy.init(args=args)
+    node = None
     try:
-        while rclpy.ok():
-            rclpy.spin_once(node, timeout_sec=0.05)
-            if node.frame is not None:
-                mode = MODES[mode_idx]
-                disp = _process(node.frame, mode)
-                label = f"{node.which}  #{node.n_frames}  [{mode}]"
-                color = (0, 255, 0)
-            else:
-                disp = _placeholder("active_cam 대기 중...")
-                label = "active_cam 대기 중"
-                color = (0, 255, 255)
-
-            if (node.judgement is not None
-                    and (time.time() - node.judgement_t) <= JUDGE_FRESH_S):
-                disp = draw_judgement(disp, node.judgement)
-                label += f"  [판정 #{node.n_judgements}]"
-
-            cv2.putText(disp, label, (10, 25), cv2.FONT_HERSHEY_SIMPLEX,
-                       0.7, color, 2, cv2.LINE_AA)
-            cv2.imshow(WINDOW_NAME, disp)
-            key = cv2.waitKey(1) & 0xFF
-            if key in (27, ord("q")):
-                break
-            if key == ord("m"):
-                mode_idx = (mode_idx + 1) % len(MODES)
-    except (KeyboardInterrupt, rclpy.executors.ExternalShutdownException):
+        node = ActiveCamViewerNode()
+        rclpy.spin(node)
+    except KeyboardInterrupt:
         pass
     finally:
-        print(f"종료 — 받은 프레임 {node.n_frames}개, 마지막 활성 카메라 "
-              f"'{node.which}'")
-        cv2.destroyAllWindows()
-        node.destroy_node()
-        if rclpy.ok():          # timeout/신호로 이미 shutdown 됐으면 또 부르지 않는다
+        if node is not None:
+            node.close_windows()
+            node.destroy_node()
+        if rclpy.ok():
             rclpy.shutdown()
-    return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    main()
