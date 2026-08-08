@@ -11,8 +11,29 @@
 """
 
 import math
+import os
 
 from dataclasses import dataclass, asdict, field
+
+# 진입 트리거 계측 (CTL_DEBUG=1) — "어느 경로가, 어떤 판정값으로 발차기를
+# 쐈는가"를 트리거 순간에 찍는다. 2026-08-08 elbow_v 오발 규명용으로 신설;
+# 켜지 않으면 아무것도 안 한다.
+_CTL_DEBUG = os.environ.get("CTL_DEBUG", "0") == "1"
+
+
+def _dbg_cond(tag, cond, extra=""):
+    if not _CTL_DEBUG:
+        return
+    c = cond or {}
+    print(f"[CTL] {tag} | 상태 {c.get('state')} 관경 {c.get('bore_mm', 0):.0f}"
+          f"/기준 {c.get('bore_ref_mm', 0):.0f}mm 분기 "
+          f"{(c.get('branch_ratio', 0) or 0) * 100:.0f}%@{c.get('branch_deg', 0):+.0f}°"
+          f"(폭{c.get('branch_arc_deg', 0):.0f}°) 2차@{c.get('branch2_deg', 0):+.0f}°"
+          f"(폭{c.get('branch2_arc_deg', 0):.0f}°) inf {c.get('branch_inf_frac', 0):.2f} "
+          f"far {c.get('branch_far_p50_mm', 0):.0f}mm 전방 "
+          f"{c.get('forward_range_m', 0):.2f}m 입사 {c.get('incidence_deg', 0):.0f}°"
+          f"@{c.get('incidence_clock_deg', 0):+.0f}° curve {c.get('curve_ahead')}"
+          f" {extra}", flush=True)
 
 IDLE = "IDLE"
 CRUISE = "CRUISE"
@@ -61,6 +82,30 @@ DEFAULTS = dict(
     condition_timeout_s=1.0,
     hold_release_s=2.0,
 
+    # ── 부하 보상 증속 (2026-08-08 사용자 지시: "중력·곡관 구조로 감속이
+    #    발생하면 자율주행이 알아서 속도를 높여라") ─────────────────────
+    # 🔑 휠 드라이브 토크 = 댐핑 × (지령 − 실제) 이므로, 실속도가 지령에
+    #    못 미치면(중력 오르막·곡관 마찰·정지 마찰) **지령을 올리는 것이
+    #    곧 토크를 더 쓰는 것**이다. 지령의 boost_lag_frac 미만으로
+    #    boost_after_s 처지면 배율을 올리고, 따라잡으면 서서히 내린다.
+    #    끼임 판정(RECOVER)보다 먼저 발동해야 물러나기 전에 밀어붙인다
+    #    (stuck_hold_s 1.5 보다 짧게).
+    # 🚨 절대 상한 boost_v_cap 은 접촉 감지폭 제약: 데모 contactOffset 이
+    #    SPEED_MPS 기준(0.10 → 0.5mm/스텝)이라, 절대속도가 이를 크게 넘으면
+    #    바퀴가 관벽을 뛰어넘는다(기록된 함정). 저속 구간(12~35mm/s)은
+    #    배율 2 라도 절대속도가 낮아 안전하다.
+    boost_max=2.0,           # 지령 배율 상한
+    boost_after_s=1.0,       # 이만큼 처져야 증속 시작 (< stuck_hold_s 1.5)
+    boost_rate=0.5,          # 초당 배율 증가
+    boost_decay=0.3,         # 따라잡은 뒤 초당 배율 감소
+    boost_lag_frac=0.6,      # 실속도 < 지령×이 값 = 처짐
+    boost_ok_frac=0.85,      # 실속도 ≥ 지령×이 값 = 따라잡음
+    boost_v_cap_mps=0.12,    # 배율 적용 후 절대 상한
+    # 출발점 이전(적산 거리 미달)에서는 발차기 금지 — RECOVER 물러남 반복으로
+    # 입구 개방단까지 밀린 로봇이 입구를 개구로 오인해 허공으로 차는 사고
+    # 방지(2026-08-08 GUI 2대 런 실측: elbow_h s=35 발차기 → 관 밖 사출).
+    entry_min_dist_m=0.05,
+
     # ── 분기 진입 기동 ──────────────────────────────────────────
     # 🚨 **들어갈지 지나칠지는 임무 의도다** — 센서가 정하지 않는다.
     #    기본 True 는 연습장용이고, 실전 임무에서는 조율기가 정해 준다.
@@ -83,6 +128,45 @@ DEFAULTS = dict(
     #    (진행방향×상방, 연습장 [턴검증] 로그)으로 한다.
     branch_right_deg=180.0,
     branch_right_window_deg=90.0,   # 오른쪽 ±90° 안에 있어야 진입
+    # 🎯 **"허공에는 절대 차지 않는다"** (2026-08-08 사용자 원칙). 진짜 T
+    #    개구는 광선이 가지 벽에 맞아 결손 중 무효(inf)가 낮다. 결손이 무효
+    #    위주면 열린-끝 허공(연습장 광학 아티팩트)이니 발차기 후보에서 뺀다.
+    # 🚨 0.5 는 위험 (CTL_DEBUG 실측): 정면 T(tee_go) 트리거 프레임의 inf 가
+    #    0.49~0.51 로 경계에 걸린다 — 반대팔 너머로 광선이 inf 로 빠지는
+    #    기하(기록된 inf 반전 실험이 tee_go 를 죽인 그 이유). 0.7 로 둔다.
+    branch_inf_max=0.7,
+    # 🎯 **장면 래치** (2026-08-08, 어제 설계안 2 의 최소 구현 — CTL_DEBUG
+    #    실측 설계): 곡관 접근(curve_ahead)을 본 뒤 이 시간 동안은 링
+    #    발차기를 금지한다. elbow_v 오발 = 곡관 분류로 굽이에 코를 들이민
+    #    로봇이 곡관 연속면을 개구(31%@body155, 오른쪽 창 안)로 본 것.
+    #    진짜 T 접근은 BRANCH 연속(곡관 프레임 0, tee 로그 실측)이라 안 걸림.
+    curve_kick_block_s=2.0,
+    # 🎯 **정지-탐색 교착 탈출** (2026-08-08 실전 맵 floor2 실측). 정면 T 는
+    #    "벽 앞에 서서 탐색하다 진입" 이 정상 동작이라 전방 게이트가 v=0 을
+    #    준다. 그런데 그 자리가 **곡관인데 BRANCH 로 읽힌 장면**이면 진입이
+    #    영원히 안 걸리고(곡관에서 발차기 금지가 옳다), BRANCH 중에는 센터링
+    #    조향도 꺼져 있어 **차지도 돌지도 못한 채 영영 선다** — 실측: floor2
+    #    출발 26mm 앞 곡관에서 v=0·휠 정지로 굳음(사용자: "바퀴회전도 안하는데?").
+    # 🔑 실제 관 속에서 서 있을 수는 없다. 이만큼 서 있었는데도 진입이 안
+    #    걸렸으면 **그 장면은 T 가 아니다** — 곡관으로 재해석해 센터링이 밀고
+    #    나가게 한다. 정면 T 는 front_confirm_s(1.5s) 안에 진입하므로 안 걸린다.
+    branch_deadlock_s=3.0,
+    # 🎯 front 트리거(정면 T 임무 규칙) 오발 가드 (2026-08-08 실측 설계) —
+    #    **개구가 보이는데 그것이 오른쪽 창에 없으면 정면 T 가 아니라 곡관**
+    #    이다(선택지가 그 개구 하나뿐 = T 아님, 사용자 구조 규칙). elbow_v
+    #    실측: 관경 12~18mm(자기몸 가림)로 곡관 표시를 못 받은 프레임에서
+    #    분기 48%@body−5°(오른쪽 아님)인데 front 트리거가 "정면 T"로 오발 →
+    #    엉뚱한 방향 발차기 → 이탈 정지. 정면 T 정지 지점 실측은 분기
+    #    6~8%(문턱 미달)라 이 가드에 안 걸린다(덤프 40장).
+    front_opening_block_ratio=0.08,
+    # 🎯 front 트리거 가드 2 — **결정판** (2026-08-08 CTL_DEBUG 계측). 곡관
+    #    정지점은 링 관경이 **정상**(46mm ≈ 기준 46, 분기 0% — 링에 아무
+    #    증거가 없다: 로봇은 아직 DN100 안이고 굽이만 앞에 있다)인 채 전방
+    #    0.12m 막힘 + 무진행이 1.5s 차서 오발했다. 진짜 정면 T 정지점은
+    #    가로대 내부 공동이 링에 잡혀 관경이 **팽창**한다(덤프 40장: 61→127,
+    #    최소 1.22×기준). → 관경이 기준×1.1 미만(공동 증거 없음)이면 front
+    #    타이머를 안 채운다. 실측 1.0(곡관) vs 1.22(T)의 사이값.
+    front_bore_expand_frac=1.10,
     entry_bend_deg=40.0,     # 기동 중 관절 총 굽힘 지령(도)
     entry_arc_m=0.24,        # 이만큼 전진하면 기동 종료 (90° 호 ≈ (π/2)·R)
     entry_v_frac=0.35,       # 기동 중 속도 배율
@@ -188,6 +272,13 @@ class DriveController:
         # RECOVER 정체 감시 (물러나는 방향조차 막힐 때 반대로 흔들기)
         self._rec_d0 = None
         self._rec_t = 0.0
+        # 장면 래치 — 곡관 접근을 본 뒤 남은 발차기 금지 시간
+        self._curve_hold_s = 0.0
+        # 적응형 순항 부스트 상태
+        self._boost = 1.0
+        self._boost_ok_s = 0.0
+        # 정지-탐색 교착 감시 (BRANCH 인데 진입도 못 하고 못 나가는 시간)
+        self._frozen_s = 0.0
 
     # ── 속도 법칙 ────────────────────────────────────────────────
     def openness(self, aperture_px):
@@ -239,6 +330,11 @@ class DriveController:
         """
         if self.k["branch_rule"] == "none":
             return None
+        # 🎯 **허공에는 절대 차지 않는다** (2026-08-08 사용자 원칙) — 결손이
+        #    무효(inf) 위주면 열린-끝 허공이지 T 개구가 아니다. 진입 금지.
+        if (float(cond.get("branch_inf_frac", 0.0) or 0.0)
+                >= self.k["branch_inf_max"]):
+            return None
         for dg, arc in ((cond.get("branch_deg", 0.0),
                          cond.get("branch_arc_deg", 0.0)),
                         (cond.get("branch2_deg", 0.0),
@@ -251,20 +347,13 @@ class DriveController:
             d = (body - self.k["branch_right_deg"] + 180.0) % 360.0 - 180.0
             if abs(d) <= self.k["branch_right_window_deg"]:
                 return float(dg)
-        # 🎯 **오른손 법칙은 "선택지가 있을 때"의 규칙이다** (2026-08-07).
-        #    "왼쪽 개구 무시하고 직진"이 성립하려면 직진로가 열려 있어야
-        #    한다(T 의 가로대). **전방이 막혀 있으면 개구가 유일한 길 =
-        #    곡관** — 방위 불문 그 개구로 간다. 이것 없이는 왼쪽으로 도는
-        #    곡관에서 게이트가 진입을 거부하고 제자리 사망한다(실측:
-        #    elbow_h 분기 50%@−180(몸 왼쪽), SLOW 정체 → 조기 중단).
-        _fr = float(cond.get("forward_range_m") or 0.0)
-        if 0.0 < _fr < self.k["front_range_m"]:
-            for dg, arc in ((cond.get("branch_deg", 0.0),
-                            cond.get("branch_arc_deg", 0.0)),
-                           (cond.get("branch2_deg", 0.0),
-                            cond.get("branch2_arc_deg", 0.0))):
-                if arc > 0.0:
-                    return float(dg)
+        # 🎯 (2026-08-08 폴백 제거) 구 "전방 막힘 = 개구가 유일한 길 = 방위
+        #    불문 진입" 폴백은 곡관에 왼발차기를 쏘는 통로였다(사용자 규칙
+        #    위반: 왼발차기는 T 전용). 이제 그 장면(단일 개구 + 직진로 막힘)
+        #    은 **검출기가 곡관 접근으로 재분류**해 여기 오지 않는다 —
+        #    곡관은 센터링 조향(curve_ahead 이득 1.2)이 민다. elbow_h 왼쪽
+        #    개구 제자리 사망(이 폴백의 도입 사유)은 재분류가 같은 장면을
+        #    받아 주므로 재발하지 않는다.
         return None
 
     def _branch_on_right(self, cond):
@@ -364,10 +453,21 @@ class DriveController:
         #    거부권이 한 번이라도 뜨면 처음부터 다시 세므로, 다리가 따라붙는
         #    확관에서는 타이머가 영영 안 찬다. 분기에서는 다리가 안 뻗으므로
         #    타이머가 그대로 찬다.
-        if suppress_branch:
+        # 장면 래치 — 곡관 **확증**(curve_sure) 프레임만 발차기 금지를
+        # 재장전한다. 모호한 곡관 정면 접근(curve_ahead 만 True)으로 걸면
+        # 정면 T 재진입 발차기까지 막는다(tee_back 이탈 80mm 실측).
+        if cond is not None and cond.get("curve_sure"):
+            self._curve_hold_s = k["curve_kick_block_s"]
+        else:
+            self._curve_hold_s = max(0.0, self._curve_hold_s - dt)
+
+        if suppress_branch or self._curve_hold_s > 0.0:
             self._branch_s = 0.0
         elif cond is not None and cond.get("state") == "BRANCH":
             self._branch_s += dt
+            if _CTL_DEBUG and (self._branch_s // 0.5
+                               != (self._branch_s - dt) // 0.5):
+                _dbg_cond(f"branch타이머 {self._branch_s:.1f}s", cond)
         else:
             self._branch_s = 0.0
 
@@ -380,12 +480,34 @@ class DriveController:
         #    다리 거부권이 링 진입도 막아 5초 조기 중단). 막힘의 실체는
         #    거리+무진행이다.
         _fr = float((cond or {}).get("forward_range_m") or 0.0)
+        # 개구가 보이는데 오른쪽 창에 없으면(왼쪽/위/아래/허공) 정면 T 가
+        # 아니다 — 곡관·측면 개구를 front 트리거가 삼키지 않게 리셋한다.
+        _op_not_right = (cond is not None
+                         and float(cond.get("branch_ratio", 0.0) or 0.0)
+                         > k["front_opening_block_ratio"]
+                         and self._right_opening(cond) is None)
+        # 링 붕괴(자기몸 가림) 프레임 — 관경이 기준의 80% 미만으로 무너지면
+        # 정면 T 증거로 안 센다(정면 T 는 관경이 팽창한다, 붕괴가 아니라).
+        _ring_blind = False
+        if cond is not None:
+            _bm = float(cond.get("bore_mm", 0.0) or 0.0)
+            _br = float(cond.get("bore_ref_mm", 0.0) or 0.0)
+            # 붕괴(자기몸 가림) 또는 공동 증거 없음(관경 정상 = 곡관) —
+            # 둘 다 정면 T 증거가 아니다. BRANCH 프레임(관경 0)은 링이
+            # 개구를 본 것이므로 여기 안 걸린다(가드 1 이 방위를 본다).
+            _ring_blind = (0.0 < _bm
+                           < _br * k["front_bore_expand_frac"])
         if (s.state in (CRUISE, SLOW) and cond is not None
                 and cond.get("passable", False)
                 and not cond.get("curve_ahead")
+                and not _op_not_right
+                and not _ring_blind
                 and 0.0 < _fr < k["front_range_m"]
                 and abs(visual_mps or 0.0) < 0.005):
             self._front_s += dt
+            if _CTL_DEBUG and (self._front_s // 0.5
+                               != (self._front_s - dt) // 0.5):
+                _dbg_cond(f"front타이머 {self._front_s:.1f}s", cond)
         else:
             self._front_s = 0.0
 
@@ -399,6 +521,33 @@ class DriveController:
             #    9mm/s). 확관 감속은 개방도 항이 이미 하므로 full 로 되돌린다.
             cond = dict(cond, state="BORE_CHANGE", passable=True, speed="full",
                         reason="다리 거부권 — 확관으로 재해석")
+        # 정지-탐색 교착 감시 — BRANCH 판정인데 실제로 못 나가고 있는 시간.
+        # (진입이 걸리면 상태가 BRANCH_ENTRY 로 바뀌어 여기 안 온다)
+        if (s.state in (CRUISE, SLOW) and cond is not None
+                and cond.get("state") == "BRANCH"
+                and abs(visual_mps or 0.0) < 0.005
+                and abs(s.v_cmd) < 0.005):
+            self._frozen_s += dt
+        else:
+            self._frozen_s = 0.0
+
+        if (self._frozen_s >= k["branch_deadlock_s"] and cond is not None
+                and cond.get("state") == "BRANCH"):
+            # 🎯 교착 탈출 (위 상수 주석) — 서 있기만 한 BRANCH 는 T 가 아니다.
+            cond = dict(cond, state="NORMAL", curve_ahead=True, speed="slow",
+                        reason=(f"정지-탐색 {self._frozen_s:.1f}s 무진행 — "
+                                f"곡관으로 재해석(교착 탈출)"))
+            _dbg_cond("교착 탈출", cond)
+        elif (self._curve_hold_s > 0.0 and cond is not None
+                and cond.get("state") == "BRANCH"):
+            # 🎯 장면 래치의 자기완결 (2026-08-08 실측): 래치가 발차기만 막고
+            #    BRANCH 판정을 그대로 두면 **차지도 조향하지도 못하는 교착**
+            #    이 된다 — BRANCH 중엔 센터링이 꺼져 있고 전방 게이트가 v=0
+            #    을 무는 굽이 입구에서 12초 정지 사망(elbow_v 실측). 곡관을
+            #    봤으면 그 뒤의 BRANCH 는 곡관 연속면이다 — 곡관 접근으로
+            #    재해석해 센터링(곡관 이득)이 꺾어 들어가게 한다.
+            cond = dict(cond, state="NORMAL", curve_ahead=True,
+                        reason="장면 래치 — 곡관 연속면으로 재해석")
 
         stuck = self.update_slip(wheel_mps, visual_mps, dt)
         g, greason = self.gate(cond)
@@ -434,6 +583,7 @@ class DriveController:
             elif (k["branch_enter"] and k["branch_rule"] != "none"
                     and cond is not None
                     and self._front_s >= k["front_confirm_s"]
+                    and s.distance_m > k["entry_min_dist_m"]
                     and s.distance_m - self._entry_done_at
                     > k["entry_cooldown_m"]):
                 # 🎯 정면 T — 전방이 막힌 채 서 있었다. 링은 개구를 못 보는
@@ -444,6 +594,8 @@ class DriveController:
                 #    상태가 바로 이 트리거의 정상 입력이다.
                 s.state = BRANCH_ENTRY
                 s.reason = "정면 T — 전방 막힘, 오른손 턴"
+                _dbg_cond("진입(front 트리거)", cond,
+                          f"front_s {self._front_s:.1f}s")
                 self._entry_clock = ((k["branch_right_deg"]
                                       - k["branch_body_offset_deg"] + 180.0)
                                      % 360.0 - 180.0)
@@ -452,6 +604,7 @@ class DriveController:
             elif (k["branch_enter"] and cond is not None
                     and cond.get("state") == "BRANCH"
                     and self._branch_s >= k["entry_confirm_s"]
+                    and s.distance_m > k["entry_min_dist_m"]
                     and s.distance_m - self._entry_done_at
                     > k["entry_cooldown_m"]
                     and not suppress_branch
@@ -462,6 +615,9 @@ class DriveController:
                 s.state = BRANCH_ENTRY
                 s.reason = (f"분기 진입 (방위 {cond.get('branch_deg', 0.0):+.0f}°"
                             f", 호 {k['entry_arc_m'] * 1000:.0f}mm)")
+                _dbg_cond("진입(링 트리거)", cond,
+                          f"branch_s {self._branch_s:.1f}s "
+                          f"right={self._right_opening(cond)}")
                 self._entry_from = s.distance_m
                 # 오른쪽으로 **고른** 개구의 방위를 래치한다 (제1 개구가
                 # 왼쪽일 수 있다 — 정면 T)
@@ -581,6 +737,24 @@ class DriveController:
         else:
             s.steer_deg = 0.0
 
+        # 부하 보상 증속 — 지령 대비 실속도가 처지면(중력·곡관 마찰·정지
+        # 마찰) 배율을 올려 휠 토크를 더 쓴다. CRUISE/SLOW 한정: RECOVER·
+        # 진입 기동·복귀는 각자의 속도 규약이 있다. 완전 정지(끼임)는
+        # 여기 소관이 아니다 — update_slip → RECOVER 가 맡는다.
+        if s.state in (CRUISE, SLOW) and abs(s.v_cmd) > 0.008:
+            _act = abs(visual_mps or 0.0)
+            if _act < abs(s.v_cmd) * k["boost_lag_frac"]:
+                self._boost_ok_s += dt
+                if self._boost_ok_s >= k["boost_after_s"]:
+                    self._boost = min(k["boost_max"],
+                                      self._boost + k["boost_rate"] * dt)
+            elif _act >= abs(s.v_cmd) * k["boost_ok_frac"]:
+                self._boost_ok_s = 0.0
+                self._boost = max(1.0, self._boost - k["boost_decay"] * dt)
+        else:
+            self._boost_ok_s = 0.0
+            self._boost = 1.0
+
         if s.state in (IDLE, HOLD, DONE):
             s.v_target = 0.0
         elif s.state == RECOVER:
@@ -602,8 +776,13 @@ class DriveController:
             s.v_target = k["v_max_mps"] * openness * curve * g * fwd
             if g > 0.0 and fwd > 0.0:
                 s.v_target = max(s.v_target, k["v_min_move_mps"])
+            # 부하 보상 배율 — 절대 상한(접촉 감지폭)으로 자른다.
+            if self._boost > 1.0 and s.v_target > 0.0:
+                s.v_target = min(s.v_target * self._boost,
+                                 k["boost_v_cap_mps"])
             s.gates = dict(openness=round(openness, 3), curve=round(curve, 3),
-                           condition=round(g, 3), forward=round(fwd, 3))
+                           condition=round(g, 3), forward=round(fwd, 3),
+                           boost=round(self._boost, 2))
 
         # 가속은 완만하게, 감속은 빠르게. 정지는 늦으면 안 된다.
         rate = k["accel_mps2"] if abs(s.v_target) > abs(s.v_cmd) else k["decel_mps2"]

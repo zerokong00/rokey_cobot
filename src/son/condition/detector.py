@@ -94,6 +94,56 @@ DEFAULTS = dict(
     #    링 통계가 무너진 프레임이었다(확관 기하 자체가 아니었다!).
     #    → 벽 반경이 정상일 때만 BRANCH 를 믿는다.
     branch_bore_sane_mm=40.0,
+    # ── 원통 전제 (2026-08-08 사용자 설계 지시) ──────────────────────
+    # 🎯 **관은 어디서나 원통이고, 기준 지름은 고정(DN100)이 아니라 추적값이다.**
+    #    reducer 와 일반관은 지름만 다른 같은 원통 — DN100 상수에 묶으면
+    #    지름이 넓어질 때 판정 전부가 착오를 일으킨다(사용자 진단). 링에서
+    #    벽이 온전히 잡히는 프레임마다 기준 반경을 슬루 제한으로 따라간다.
+    #    bore_dn100_mm 는 이제 **초기값**이다.
+    bore_ref_slew_mm=2.0,       # 프레임당 기준 반경 이동 상한 (10Hz → 20mm/s;
+    #                             테이퍼 4.76°×0.1m/s = 8mm/s 를 여유로 따라감)
+    # BRANCH 신뢰 조건(벽 반경 정상)도 추적 기준에 비례시킨다 — DN150 에서
+    # 고정 40mm 는 너무 느슨하다(벽 75 대비 절반). 고정값은 하한으로만 남긴다.
+    branch_bore_sane_frac=0.80,
+    # 🎯 **T/곡관 판별 = 양옆 개구 유무** (2026-08-08 사용자 설계 지시).
+    #    개구가 하나뿐이고 **직진로까지 막혔으면** 선택지가 없다 = 곡관.
+    #    (T 는 양옆이 뚫렸거나(정면 T) 한쪽 개구 + 직진로 열림(측면 T)이다.)
+    #    곡관은 발차기(BRANCH_ENTRY) 없이 센터링 조향으로 민다 — 사용자 규칙
+    #    "왼발차기는 T 에서만". 직진로 열림 문턱; 곡관 접근 실측 fr 0.10~0.25,
+    #    측면 T 접합부의 직진로(가로대 반대팔)는 ≥0.35 로 갈린다.
+    front_open_m=0.30,
+    # 🎯 **곡관 정면 접근의 전방 문턱** (2026-08-08, 실전 맵 실측 설계).
+    #    긴 직관 끝의 굽이를 정면으로 보면 개구 윤곽이 거칠어(0.147) 변형 관
+    #    검사에 걸려 UNDETERMINED 로 선다 — 그런데 개구가 아직 화면 중앙이라
+    #    (입사 1°) 기존 곡관 예외(입사 ≥15°)가 안 받는다. 실전 맵 floor1
+    #    출발점에서 그대로 사망했다.
+    #    🔑 가르는 신호는 **전방 거리**다 (같은 잣대로 잰 실측):
+    #        변형 관(합성 회귀 정답 UNDETERMINED) 0.257 / 0.308 / 0.339m
+    #        굽이 정면(실전 맵 floor1 s520)          **0.153m**
+    #      굽이는 시야를 막고, 변형된 직관은 여전히 멀리까지 보인다.
+    #    0.20 = 두 무리의 가운데. 단절(0.210m·무효 4.7%)은 무효 화소 조건으로
+    #    따로 막는다 — 이 규칙은 무효 <2%(단절 문턱) 일 때만 산다.
+    curve_front_m=0.20,
+    # 🎯 **닫힌 곡관 판별자** (2026-08-08 실전 맵, 덤프 114장 실측 설계).
+    #    실전 맵의 곡관 코너에서 링이 "벽 없음 50%@폭80°" 를 내 T 로 오탐하고
+    #    왼발차기가 나갔다(루프 주행 중 사망). 어제의 `branch_far_bore_ratio`
+    #    (>2.6 = 곡관)는 **열린-끝 연습 곡관** 기준이라 이 맵에서는 반대로
+    #    나온다 — 실전 곡관은 출구 너머에 관이 이어져 far 가 작다.
+    #    🔑 같은 잣대로 잰 분포가 **완전히 갈린다**:
+    #        새 맵 곡관   far/bore 1.13 ~ **1.15** (40장, 매우 좁게 뭉침)
+    #        tee_go  (T)          **1.81** ~ 2.44 (40장)
+    #        tee_back(T)          **1.74** ~ 1.81 (34장)
+    #      곡관 최대 1.149 < T 최소 1.616 — 겹침 0.
+    # 🚨 **코너마다 다르다** (2026-08-08, 2차 실측): 돌자마자 T 로 이어지는
+    #    코너(730,1400)는 광선이 그 관 안으로 달아나 1.36~2.21 로 T 와 겹친다
+    #    (메모리의 "긴 가지에서는 반경으로 원리적으로 못 가른다" 와 같은 한계).
+    #    → 문턱은 **T 를 하나도 잃지 않는 상한**(T 최소 1.616)에서 안전여유를
+    #      뺀 1.50 으로 둔다: T 74장 손실 0, 곡관 80장 중 44장이 곡관으로
+    #      확정된다. 나머지 깜빡이는 프레임은 **장면 래치**(곡관을 한 번 보면
+    #      2초간 발차기 금지, driver.curve_kick_block_s)가 흡수한다.
+    #    물리도 맞는다: 곡관은 **바깥벽이 물러난 것**이라 거리가 관 반경의
+    #    1.1배대에 머물고, T 는 광선이 **가지 관 안으로 들어가** 훨씬 멀다.
+    branch_far_bore_min=1.50,
 )
 
 
@@ -144,6 +194,10 @@ class Condition:
     invalid_ratio: float = 0.0
     aperture_px: int = 0
     bore_mm: float = 0.0        # 실측 관 내반경 (0 = 못 쟀다)
+    # 🎯 추적 기준 반경 (2026-08-08 원통 전제) — 판정·주행이 "지금 관"의
+    #    반경으로 삼는 값. DN100 상수가 아니라 벽이 온전한 프레임마다
+    #    슬루 제한으로 실측을 따라간다. 다리 스트로크 상한 등에 쓸 것.
+    bore_ref_mm: float = 0.0
     branch_ratio: float = 0.0   # 중간 링에서 벽이 없는 화소 비율
     branch_deg: float = 0.0     # 제1 개구 방위 (화면 화소 좌표, 도)
     branch_arc_deg: float = 0.0  # 제1 개구 방위 폭
@@ -160,6 +214,13 @@ class Condition:
     # 이득을 쓴다(일반 프레임에 강한 이득을 쓰면 T 접합부 근처에서 과조향
     # 사출: 실측 이탈 294mm).
     curve_ahead: bool = False
+    # 🎯 곡관 **확증** 표시 (2026-08-08) — 링에 양성 증거(far 분포 ×2.6, 또는
+    #    단일 개구+직진로 막힘)가 있는 곡관만 True. 곡관 정면 접근(링 사각,
+    #    분기 0%)은 정면 T 와 센서 신호가 같을 수 있는 **모호 장면**이라
+    #    False 로 남는다 — 주행의 발차기 금지 래치는 이 값만 믿는다
+    #    (curve_ahead 로 래치를 걸었더니 tee_back 2랩 재진입 발차기까지
+    #    막아 이탈 80mm 사출, 실측).
+    curve_sure: bool = False
     passable: bool = False
     speed: str = SPEED_STOP
     reason: str = ""
@@ -178,6 +239,8 @@ class PipeConditionDetector:
         self.ppx = float(intrinsics["ppx"])
         self.ppy = float(intrinsics["ppy"])
         self.f_fish = float(intrinsics.get("f_fish", self.fx))
+        # 원통 전제 — 기준 반경 추적 상태. 초기값은 DN100(투입관 규격).
+        self.bore_ref = float(self.k["bore_dn100_mm"])
 
     def incidence_angle(self, cx, cy):
         """개구부 중심 픽셀 -> 광축에서 벌어진 각(rad).
@@ -352,6 +415,16 @@ class PipeConditionDetector:
          c.branch_inf_frac, c.branch_far_p50_mm) = self.ring_scan(depth,
                                                                   invalid)
 
+        # 🎯 원통 전제 — 기준 반경 추적 (2026-08-08). 링에서 벽이 온전히
+        #    잡힌 프레임(결손 비율이 분기 문턱 미만)만 신뢰하고, 프레임당
+        #    슬루 상한으로 실측 반경을 따라간다. reducer 테이퍼(8mm/s)는
+        #    따라가고, 개구·자기몸체 오염 프레임은 기준을 못 흔든다.
+        if c.bore_mm > 0 and c.branch_ratio < self.k["branch_ratio_min"]:
+            _slew = self.k["bore_ref_slew_mm"]
+            self.bore_ref += float(np.clip(c.bore_mm - self.bore_ref,
+                                           -_slew, _slew))
+        c.bore_ref_mm = self.bore_ref
+
         # 🎯 개구부 중심(≈전방 관 축 방향)도 **판정 전에 항상 재 둔다**
         #    (2026-08-07, 센터링 조향). 꼬리 갈래에서만 재면 곡관 예외·BRANCH
         #    조기 리턴이 사실상 매 프레임이라(관절이 물러 직관에서도 8° 를
@@ -402,23 +475,46 @@ class PipeConditionDetector:
                        and c.branch_inf_frac < 0.5
                        and c.branch_far_p50_mm
                        > c.bore_mm * self.k["branch_far_bore_ratio"])
+        # 🎯 **벽이 물러났을 뿐 = 닫힌 곡관** (2026-08-08 실측, 위 상수 주석).
+        #    T 는 광선이 가지 관으로 들어가 far 가 bore 의 1.6배를 넘는다.
+        _wall_receded = (c.branch_far_p50_mm > 0 and c.bore_mm > 0
+                         and c.branch_far_p50_mm
+                         < c.bore_mm * self.k["branch_far_bore_min"])
+        # 벽 반경 정상 문턱 — 고정 40mm 는 하한, 기준 반경의 80% 를 따라간다
+        # (원통 전제: DN150 에서 40mm 는 벽 75 의 절반이라 너무 느슨하다).
+        _sane = max(self.k["branch_bore_sane_mm"],
+                    self.bore_ref * self.k["branch_bore_sane_frac"])
         _openingish = (c.branch_ratio > self.k["branch_ratio_min"]
-                       and c.bore_mm >= self.k["branch_bore_sane_mm"]
+                       and c.bore_mm >= _sane
                        and self.k["branch_arc_min_deg"] < c.branch_arc_deg
                        < self.k["branch_arc_max_deg"])
         # 🚨 곡관으로 가른 프레임을 그냥 흘려보내면 안 된다 — 개구 무게중심이
         #    화면 밖으로 크게 벗어나 MISALIGNMENT(통행 불가)로 빠지고 HOLD 로
         #    영영 선다(실측: elbow s=180 입사 31° HOLD 사망). **곡관 접근은
         #    통행 가능·감속**이다 — 조향(센터링)이 입사각을 보고 꺾어 들어간다.
-        if _openingish and _curve_like:
+        # 🎯 **T/곡관 판별 = 양옆 개구 유무** (2026-08-08 사용자 설계 지시).
+        #    T 는 선택지가 있는 구조다 — 양옆이 다 뚫렸거나(정면 T), 한쪽
+        #    개구 + 직진로 열림(측면 T). **개구가 하나뿐인데 직진로마저
+        #    막혔으면 선택지가 없다 = 곡관** — 그 개구가 유일한 길이므로
+        #    발차기(BRANCH)가 아니라 곡관 접근(센터링 조향)으로 분류한다.
+        #    far 분포 판별자(×2.6)가 못 가르던 열린-끝 허공 곡관(far=inf 라
+        #    _curve_like 불성립 → BRANCH 오탐 → 곡관 발차기, 어제 미해결)을
+        #    이 구조 규칙이 잡는다.
+        _two_sided = c.branch2_arc_deg > 0.0
+        _fwd_blocked = 0.0 < c.forward_range_m < self.k["front_open_m"]
+        if _openingish and (_curve_like or _wall_receded
+                            or (not _two_sided and _fwd_blocked)):
             c.state, c.passable, c.speed = NORMAL, True, SPEED_SLOW
             c.curve_ahead = True
+            c.curve_sure = True
             # 🚨 개방도(aperture_px)를 실어 준다 — 안 실으면 속도 법칙이
             #    바닥값(0.25)을 물어 v≈2mm/s 로 정지 마찰에 진다(실측).
             c.aperture_px = int(area)
-            c.reason = (f"곡관 접근 — far {c.branch_far_p50_mm:.0f}mm > "
-                        f"{self.k['branch_far_bore_ratio']:.1f}×관경"
-                        f"{c.bore_mm:.0f}")
+            c.reason = ((f"곡관 접근 — far {c.branch_far_p50_mm:.0f}mm > "
+                         f"{self.k['branch_far_bore_ratio']:.1f}×관경"
+                         f"{c.bore_mm:.0f}") if _curve_like else
+                        (f"곡관 접근 — 단일 개구 {c.branch_deg:+.0f}° + "
+                         f"직진로 막힘 {c.forward_range_m:.2f}m = 선택지 없음"))
             return c
         if _openingish:
             # (클러스터 폭은 실제 연속 폭이다 — 정면 T 의 좌·우 개구는 각각
@@ -433,18 +529,49 @@ class PipeConditionDetector:
                         f"방위 {c.branch_deg:+.0f}° 폭 {c.branch_arc_deg:.0f}°")
             return c
 
+        # 🎯 **곡관 정면 접근** (2026-08-08 CTL_DEBUG 계측 설계) — 개구가 링
+        #    사각이라 안 보여도(elbow_v 실측: 분기 0%), 전방이 막혔고(0.12m)
+        #    관경이 기준과 정상 일치(46/46)하며 개구부 원반이 축에서 크게
+        #    벗어나(입사 21°) 있으면 굽이가 바로 앞이다. curve_ahead 를 줘야
+        #    센터링이 곡관 이득(1.2)으로 꺾어 들어가고 front 트리거(정면 T)
+        #    타이머도 안 찬다. 진짜 정면 T 정지점은 관경이 팽창(61~127mm,
+        #    ≥1.22×기준)이라 "관경 정상" 조건에 안 걸린다(덤프 40장).
+        # 🚨 문턱은 `curve_front_m`(0.20) 이지 `front_open_m`(0.30) 이 아니다 —
+        #    후자는 "T 의 직진로가 열렸나" 용이라 변형 관(0.257~)까지 삼킨다.
+        # 🚨 무효 화소는 **단절 문턱(2%) 미만**일 때만 — 단절 장면이
+        #    (전방 0.210m·무효 4.7%) 곡관으로 새는 것을 막는다.
+        # 🚨 관경 ±8mm 조건이 **정면 T 를 배제한다** — 가로대 공동이 잡혀
+        #    관경이 1.22배 이상 팽창하므로(덤프 40장) 이 창에 안 들어온다.
+        if (0.0 < c.forward_range_m < self.k["curve_front_m"]
+                and c.bore_mm > 0
+                and abs(c.bore_mm - self.bore_ref)
+                <= self.k["bore_change_mm"]
+                and c.invalid_ratio < self.k["invalid_ratio_max"]
+                and c.branch2_arc_deg <= 0.0):
+            c.state, c.passable, c.speed = NORMAL, True, SPEED_SLOW
+            c.curve_ahead = True
+            if area > 0:
+                c.aperture_px = int(area)
+            c.reason = (f"곡관 접근(정면) — 전방 {c.forward_range_m:.2f}m 막힘"
+                        f", 관경 {c.bore_mm:.0f}≈기준, 입사 {c.incidence_deg:.0f}°")
+            return c
+
         if abs(joint_angle_deg) >= self.k["bend_angle_deg"]:
             c.state, c.passable, c.speed = NORMAL, True, SPEED_FULL
             c.reason = f"곡관 (관절 {joint_angle_deg:.1f}°) — 판정 생략"
             return c
 
-        # 관경 변화 — 벽은 온전한데 반경이 기준에서 벗어났다(리듀서/확관).
+        # 관경 변화 — 벽은 온전한데 반경이 **추적 기준**에서 벗어났다.
+        # 🎯 원통 전제(2026-08-08): 기준이 DN100 상수가 아니라 추적값이므로
+        #    DN150 직관 구간은 기준이 75 로 수렴해 NORMAL 이 된다 — reducer 는
+        #    "지름이 다른 같은 원통"이지 상시 경계 대상이 아니다(사용자 지시).
+        #    BORE_CHANGE 는 슬루(20mm/s)보다 빨리 변하는 과도 구간에만 뜬다.
         if (c.bore_mm > 0
-                and abs(c.bore_mm - self.k["bore_dn100_mm"])
+                and abs(c.bore_mm - self.bore_ref)
                 > self.k["bore_change_mm"]):
             c.state, c.passable, c.speed = BORE_CHANGE, True, SPEED_SLOW
             c.reason = (f"관경 {c.bore_mm:.0f}mm "
-                        f"(기준 {self.k['bore_dn100_mm']:.0f}mm)")
+                        f"(추적 기준 {self.bore_ref:.0f}mm)")
             return c
 
         if c.invalid_ratio > self.k["invalid_ratio_max"]:
@@ -480,7 +607,7 @@ class PipeConditionDetector:
         #    있는 변형은 기존대로 UNDETERMINED 정지.
         _shape_bad = (c.circularity < self.k["circularity_min"]
                       or c.roughness > self.k["roughness_max"])
-        if _shape_bad and abs(c.bore_mm - self.k["bore_dn100_mm"]) <= \
+        if _shape_bad and abs(c.bore_mm - self.bore_ref) <= \
                 self.k["bore_change_mm"] and c.invalid_ratio < 0.05 \
                 and abs(c.incidence_deg) >= 15.0:
             c.state, c.passable, c.speed = NORMAL, True, SPEED_SLOW
