@@ -3,19 +3,116 @@
 `pipe_comm/web_panel` (FastAPI) 이 서빙하는 페이지다. ROS 파이썬 패키지와
 수명·도구가 달라 워크스페이스 최상위로 분리해 둔다.
 
+🔑 **지금은 한 화면짜리다** (2026-08-10 사용자 지시). 사이드바와 Home ·
+Robot Handling · Detect List 를 걷어내고 **3D Map 하나**만 남겼다(제목은
+`Pipe Repair Robot`) — 그 화면에 상태·결함·지령·카메라가 이미 다 들어 있어
+나머지 페이지와 겹쳤다. 모듈은 하나도 안 지웠으니 되살리는 것은 두 곳이다:
+`app.js` 의 `ROUTES` 에 줄을 넣고, `index.html` 에 `<nav id="side">…<ul
+id="nav">` 를 돌려놓는다(app.js 는 `#nav` 가 있을 때만 사이드바를 채운다).
+
 ```
-index.html            셸 — 사이드바 + 본문 틀 (__NS__ 는 서버가 치환)
+index.html            셸 — 머리말 + 본문 틀 (__NS__ 는 서버가 치환)
 panel.css             스타일 (다크. 관제실 화면이라 카메라 영상 대비가 산다)
-app.js                라우터 + 웹소켓 + 공유 store + 지령 — ES 모듈
-views/home.js         Home        대시보드 요약
-views/handling.js     Robot Handling  조종석 — 지령 + 카메라 + 상태 + 사건 로그
-views/camera.js       (사이드바에 없음) 카메라 한 칸 — `mountCam()` 을 조종석이 쓴다
-views/events.js       (사이드바에 없음) 사건 로그 — `mountLog()` 을 조종석이 쓴다
-views/map3d.js        3D Map      three.js 배관 맵
-views/detect.js       Detect List 결함 리포트 표
+app.js                라우터 + 웹소켓 + 로봇별 store + 지령 — ES 모듈
+views/map3d.js        3D Map (지금 유일한 페이지 — 'Pipe Repair Robot')
+views/status.js       └ 층별 상태·결함 비교표 `mountFloorPanels()`
+views/handling.js     └ 지령 버튼 `mountButtons()` (조종석 페이지는 지금 꺼져 있다)
+views/camera.js       └ 카메라 한 칸 `mountCam()`
+views/events.js       (사이드바에 없음) 사건 로그 `mountLog()`
+views/home.js         (꺼짐) Home        층별 대시보드 요약
+views/detect.js       (꺼짐) Detect List 결함 리포트 표
 three.module.min.js   three@0.160.1 벤더 사본
 OrbitControls.js      three examples/jsm 사본 (importmap 으로 'three' 해석)
 ```
+
+## 로봇이 여러 대다 — 층별 **동시** 주행 (2026-08-10)
+
+```bash
+ros2 run pipe_comm web_panel --ros-args -p ns:=floor1,floor2 -p port:=8080
+```
+
+시연은 **층마다 프로세스를 따로** 띄운다(같은 프로세스에 두 층을 올리면 건물
+셸이 두 겹으로 겹친다 — `real_map_demo_v1_1.py` 가 막아 둔 이유):
+
+```bash
+# 2층                                        # 1층 (다른 터미널)
+ROS_NS=floor2 isaac_python src/son/real_map_demo_v1_1.py \
+      --course floor2 --ros --cam --wait --hold
+ROS_NS=floor1 START_S=1.05 isaac_python src/son/real_map_demo_v1_1.py \
+      --course floor1 --ros --cam --wait --hold
+```
+
+🔑 `--wait` 는 **안착만 하고 서서 기다린다.** 기동 시간이 제각각이라 이게
+없으면 먼저 뜬 쪽이 혼자 출발한다 — 둘 다 뜬 뒤 화면 가운데 **임무 지령**
+칸 맨 위의 **▶ 전체**(`robot:all`)를 누르면 같은 순간에 출발한다.
+
+`ns` 는 **쉼표 목록**이고 그 순서가 곧 화면의 **왼→오른쪽**이다
+(`floor1,floor2` → 왼쪽 1층 / 오른쪽 2층). 한 개만 주면 예전과 똑같은 한 칸
+화면이다. 이름표는 규약의 `contract.ns_label()` 이 정하고(`floor1` → `1층`)
+`-p labels:=1층,2층` 으로 덮어쓸 수 있다.
+
+🔑 **1층과 2층은 연결되어 있지 않다.** 각자 자기 층에서 따로 출발해 따로
+끝나는 별개의 임무다. 그래서 `store` 는 **로봇마다 통째로 따로**이고
+(`store.robots[]` — 상태·코스·사건·결함·마커·카메라가 그 안에 있다) 진행률이나
+결함 수를 합치지 않는다. 재시작(`run`)도 층마다 따로 센다 — 2층을 다시 돌린다고
+1층 자취를 지우면 안 된다.
+
+| 화면 | 층을 어떻게 놓나 |
+|---|---|
+| 3D Map (지금 유일) | 한 장면에 **빨간 점 두 개**. 가운데 칸은 층을 한 표에 나란히, 지령은 `전체 / 1층 / 2층` 세 묶음 |
+| Home · Robot Handling · Detect List (꺼짐) | 되살리면 왼쪽 1층 / 오른쪽 2층 두 칸 |
+
+🔑 로봇 목록의 단일 출처는 웹소켓이 접속 직후 보내는 **`hello`** 다
+(`GET /robots` 로도 같은 것을 준다). 그래서 시연이 아직 안 떠서 데이터가
+하나도 없어도 칸은 제대로 선다. 목록이 바뀌면 지금 페이지를 다시 그린다.
+
+🚨 **검출 노드도 대수만큼 띄운다.** 결함 리포트 토픽은 `<ns>/defect/report_json`
+이다(`json_topic:=/floor2/defect/report_json`). 이름 없는 옛 절대 토픽
+`/defect/report_json` 도 계속 받지만 **첫 번째 로봇 것으로 친다** — 두 대가
+같은 절대 토픽에 쏘면 구별할 방법이 없다.
+
+### 🚨 층이 다르면 좌표 원점도 다르다
+
+시연은 **활성 층의 수평망을 월드 z=0 으로 올려놓고** 좌표를 낸다(floor2 +250 /
+floor1 +2740.2mm). 두 대의 `pos_m`·`course` 를 그대로 겹쳐 그리면 1층 로봇이
+2층 배관 속을 달린다 — 2.49m 차이라 눈에 안 띄지도 않는다.
+
+- 시연이 `course.z_shift_mm`(= `-Z_NET`)을 실어 주거나, 안 실어도 서버가
+  **받은 `.webmesh` 헤더**에서 같은 값을 읽는다.
+- 서버는 `hello` 에 로봇별 `z_shift_mm` 과 기준 프레임(`z_ref_mm`, `/mesh` 를
+  준 쪽)을 담아 준다.
+- 3D 맵은 로봇마다 Group 하나를 `dzM(r) = (z_ref − z_robot)/1000` 만큼 z 로
+  밀어 겹친다. 계산이 **거기 한 줄뿐**이고 Viz 안쪽은 시연이 준 좌표 그대로다.
+- z 를 모르는 로봇이 있으면 못 민다. 🚨 이때 화면은 아무 말도 안 한다(맵 아래
+  줄을 2026-08-10 에 뺐다) — **서버 로그**의 `WARN` 이 유일한 신호다.
+
+🚨 **기준은 "그림(메시)" 쪽이다 — 코스가 아니다.** 둘이 다를 수 있기 때문이다:
+`.webmesh` 캐시가 **지난 층 것**이면 좌표는 floor2 인데 건물은 floor1 프레임으로
+온다. 실측 2026-08-10 — `--course floor2` 로 띄웠는데 메시 헤더가 z=+2740.2
+(floor1)라 **2층 로봇이 1층 배관 속을 달렸다.** 원인은 `publish_mesh` 가 낡음을
+mtime 으로만 판정한 것(층을 바꿔도 다시 안 구웠다). 두 군데를 고쳤다:
+
+- `ros_bridge.publish_mesh` / `web_panel.find_mesh` — **z 오프셋이 다르면 다시
+  굽는다**(mtime 이 새것이어도).
+- 패널은 메시의 z(`mesh_z_mm`)와 로봇 좌표의 z(`z_shift_mm`)를 **따로** 들고,
+  기준(`z_ref_mm`)은 메시 쪽을 쓴다. 둘이 어긋나면 서버 로그에 `WARN` 으로
+  얼마나 되미는지 적는다 — 그림은 맞게 나오지만 원인은 시연 쪽에 있다.
+
+### 웹소켓 규약이 로봇 단위로 바뀌었다
+
+```jsonc
+{"type":"hello","data":{"robots":[{"ns":"floor1","label":"1층","idx":1,
+                                   "z_shift_mm":2740.2,"has_mesh":true}],
+                        "mesh_robot":"floor1","z_ref_mm":2740.2}}
+{"type":"state","robot":"floor1","data":{…}}   // course·event·defect·cmd 도 같다
+```
+
+바이너리(카메라)는 머리가 **2 바이트 = `[로봇 번호, 채널]`** 이다(예전에는
+채널 1바이트). 번호는 `hello` 의 `idx`(1부터), 채널은 1 전방 / 2 후방 / 3 토치.
+`web_panel.py` 의 `CAM_CH` 와 `app.js` 의 `CH` 를 **같이** 고칠 것.
+
+지령은 `POST /cmd {cmd, robot}` — `robot` 에 ns 또는 `all`. 빼면 첫 로봇으로
+간다(옛 클라이언트 호환). 🚨 두 대인데 대상을 안 적으면 **1층에만** 간다.
 
 ## 페이지와 주소
 
@@ -64,6 +161,13 @@ Event Log 를 나갔다 와도 로그가 비지 않는다.
 (`.py` 를 고쳤을 때만 재빌드가 필요하다 — 이 패키지는 --symlink-install
 로도 파일이 복사된다.)
 
+🚨 그 "새로고침만" 이 한동안 거짓말이었다(2026-08-10 실측: 3D Map 을 세 칸으로
+바꿨는데 옛 화면이 계속 떴다). 기본 `StaticFiles` 는 `Cache-Control` 을 안 줘서
+브라우저가 **휴리스틱 캐싱**으로 서버에 묻지도 않고 옛 `.js` 를 쓴다 — 방금
+고친 파일일수록 더 그렇다. 그래서 `/static` 에 `Cache-Control: no-cache` 를
+붙였다(“쓰지 마라” 가 아니라 “쓰기 전에 물어봐라” — 안 바뀌었으면 304 다).
+옛 서버가 돌고 있다면 강력 새로고침(Ctrl+Shift+R)으로 넘길 수 있다.
+
 ```bash
 ros2 run pipe_comm web_panel --ros-args -p ns:=robot -p port:=8080
 ```
@@ -75,18 +179,21 @@ ros2 run pipe_comm web_panel --ros-args -p ns:=robot -p port:=8080
 
 ## 데이터가 어디서 오나
 
+토픽은 전부 로봇의 네임스페이스 아래다(`/floor1/rgb/compressed` …).
+
 | 화면 | 출처 |
 |---|---|
-| 카메라 3대 | `rgb/compressed`, `rear/rgb/compressed`, `torch/rgb/compressed` → WS 바이너리 채널 1/2/3 |
+| 카메라 3대 | `rgb/compressed`, `rear/rgb/compressed`, `torch/rgb/compressed` → WS 바이너리 `[로봇번호, 채널 1/2/3]` |
 | 지금 켜진 카메라 | `drive_state` 의 `cam` (`front`/`rear`/`torch`) |
 | 지령 이력 | `POST /cmd` 를 서버가 기록 → WS `{"type":"cmd"}` (지금은 그리는 화면이 없다. `store.cmds` 에 쌓이고 서버 로그에도 남는다) |
 | 코스 중심선(관 튜브) | `course` 토픽(latched) → WS `{"type":"course"}` |
-| CAD 메시(전체 맵) | `GET /mesh` — **`mesh` 토픽(latched)으로 Isaac 이 넘긴 것**이 1순위, 없으면 로컬 `.webmesh` 파일 |
+| 층 정렬(z 오프셋) | `course.z_shift_mm`, 없으면 `.webmesh` 헤더 → `hello` |
+| CAD 메시(전체 맵) | `GET /mesh` — **`mesh` 토픽(latched)으로 Isaac 이 넘긴 것**이 1순위, 없으면 로컬 `.webmesh` 파일. 두 층이 한 파일에 다 있어 로봇이 여럿이어도 하나면 된다 |
 | 로봇 빨간 점 | `drive_state` 의 `pos_m` (없으면 `s_mm`) |
-| 결함 목록·✕ 마커 | `/defect/report_json` |
+| 결함 목록·✕ 마커 | `<ns>/defect/report_json` (이름 없는 `/defect/report_json` 은 첫 로봇 것) |
 | 사건 로그·수리 스티커 | `event` (WELD_BEGIN/DONE) |
 | 지나온 초록선 | `drive_state` 의 `max_s_mm` (서버가 누적) |
-| 지령 버튼 | `POST /cmd` → `mission` 토픽 |
+| 지령 버튼 | `POST /cmd {cmd, robot}` → 그 로봇의 `mission` 토픽 |
 
 ## 버튼 구성
 
@@ -96,6 +203,12 @@ ros2 run pipe_comm web_panel --ros-args -p ns:=robot -p port:=8080
 | ⏩ 전진 점검 | `FORWARD` | 복귀를 접고 다시 전진하며 결함을 찾는다 |
 | ↩ 복귀 | `RECALL` | 방향을 뒤집어 출발점으로 |
 | ⛔ 비상정지 / 🔓 해제 | `ESTOP` / `START`+`ESTOP_RELEASE` | 아래 참고 |
+
+🔑 버튼 한 벌은 **로봇 한 대**의 것이다 — 누른 칸의 ns 가 곧 대상이다.
+두 대를 같이 몰 때만 임무 지령 칸 맨 위의 "전체" 묶음(▶/⏸/⛔ 전체,
+`robot:all`)을 쓴다. 전체 버튼은 **토글이 아니다** —
+두 대의 상태가 서로 다를 수 있어(한 대는 주행, 한 대는 용접 중) 한 글자로
+대표할 수가 없다.
 
 🔑 토글은 **누른 순간 뒤집지 않는다.** 시연이 지령을 미룰 수 있어서(바로 아래),
 누르자마자 글자를 바꾸면 버튼이 거짓말을 한다. 대신 상태가 따라올 때까지
@@ -133,6 +246,28 @@ Isaac GUI 에서 Stop→Play 로 시연을 다시 돌리면 `drive_state.step` �
 **새로 붙는 브라우저**에는 지난 판의 사건을 다시 보내지 않는다 — 그러지
 않으면 새로고침 한 번에 지난 판의 용접 스티커가 되살아난다.
 
+## 시연을 **끄면** 판을 접는다 (`stale_s`, 기본 8초)
+
+재시작은 `step` 이 뒤로 가는 것으로 알아채지만, 그냥 끄면 **아무 신호도 안
+온다.** 그러면 서버는 마지막 상태를 계속 들고 있고, 새로고침해도 화면은 로봇이
+관 속에 살아 있는 그림 그대로다(2026-08-10 사용자 보고). 그래서 침묵을 신호로
+바꾼다 — `drive_state` 가 `stale_s` 초 동안 없으면 그 로봇의 **판을 접는다**:
+
+| 지우는 것 | 남기는 것 |
+|---|---|
+| 마지막 상태 · 답파거리 · 결함 목록 · 카메라 프레임 | 사건 로그 · 코스 · CAD 메시 |
+
+`run` 이 올라가고 명패에 `stale: true` 가 실려 `hello` 로 나간다. 열려 있는
+브라우저는 그걸 보고 초록선·마커·결함표를 지우고 `끊김` 으로 바꾸며, 새로
+붙는 브라우저는 애초에 빈 화면을 받는다. 상태가 다시 오면 깃발이 내려가고
+새 판으로 센다. `-p stale_s:=0` 으로 끌 수 있다.
+
+🚨 **결함(`defects`)도 판이 바뀌면 같이 버린다.** 예전에는 사건만 지워서,
+재시작 뒤 새로고침하면 지난 판의 ✕ 마커와 Detect List 가 되살아났다.
+소켓 커서는 `events_dropped` 처럼 `defects_dropped` 로 보정한다 — 새로 붙는
+소켓의 커서를 0 이 아니라 **지금까지 버린 수**에서 시작해야 음수 슬라이스로
+이번 판의 앞부분을 놓치지 않는다(재시작 뒤에만 드러나던 함정).
+
 🔑 **코스 좌표를 여기에 하드코딩하지 않는다.** 기하의 단일 출처는 시연
 (`real_map_demo.py` 의 `CenterLine`) 이고, 맵이 바뀌면 그쪽만 고치면 된다.
 
@@ -157,10 +292,12 @@ Isaac GUI 에서 Stop→Play 로 시연을 다시 돌리면 `drive_state.step` �
 
 ## Robot Handling 은 조종석이다
 
-위에서부터 **임무 지령 → 카메라 → (현재 상태 | 사건 로그)** 한 화면이다.
-카메라 칸과 로그 칸은 각 페이지의 모듈을 그대로 끼운다 —
-`camera.js` 의 `mountCam(el, {bare:true})`, `events.js` 의 `mountLog(el, {limit})`.
-🔑 사건 줄·카메라 칸을 두 벌 만들지 말 것. 한쪽만 고쳐지면 같은 사건이 두
+로봇 한 대가 조종석 한 벌이다(왼쪽 1층 / 오른쪽 2층). 한 벌은 위에서부터
+**임무 지령 → 카메라 → 현재 상태 → 사건 로그** 다. 부속은 각 페이지의 모듈을
+그대로 끼운다 — `camera.js` 의 `mountCam(el, {robot, bare:true})`,
+`events.js` 의 `mountLog(el, {robot, limit})`, 지령 버튼은 이 파일이 export 하는
+`mountButtons(el, r)`(3D Map 가운데 칸도 같은 것을 쓴다).
+🔑 사건 줄·카메라 칸·버튼을 두 벌 만들지 말 것. 한쪽만 고쳐지면 같은 사건이 두
 화면에 다르게 보인다.
 
 속도 슬라이더·지령 이력·지령 규약 카드는 뺐다(2026-08-08, 조종석을 비우려고).
@@ -189,9 +326,47 @@ Home 의 카메라 칸도 켜진 것을 따라 바뀐다.
 🚨 그래서 "후방 카메라가 안 나온다" 는 대개 고장이 아니라 이 분기다. 켜져
 있는데 끊긴 경우에만 "N초째 프레임 없음" 으로 적는다.
 
+🚨 **분기는 "부호 있는 속도"로 정해지는데 그 부호가 두 군데에서 온다.**
+`real_map_demo_v1_1.py` 는 `NAV=vision` 이면 `v_cmd` 에 부호를 싣고(`dir` 은 늘
++1), `NAV=onboard`(기본)이면 `v_cmd` 를 크기로만 쓰고 방향을 `dir` 로 뒤집는다.
+`v_cmd` 만 보던 옛 코드는 **onboard 에서 후진 중에도 `cam=front`·`dir=+1`** 을
+보냈다 — 웹은 시킨 대로 전방을 보여 준 것이고 거짓말한 쪽은 시연이었다
+(2026-08-10 수정: 둘을 곱해 하나의 부호로 만든다).
+
 ## Detect List 는 보고서 파일이 아니다
 
 주행이 끝난 뒤 올라오는 파일이 아니라, dongyeon 검출 노드(`pipe_vision_node`)가
-**결함을 볼 때마다 실시간으로** 흘리는 `/defect/report_json` 을 표로 쌓은
+**결함을 볼 때마다 실시간으로** 흘리는 `<ns>/defect/report_json` 을 표로 쌓은
 것이다. 그래서 검출 노드를 안 띄우면 **끝까지 비어 있다**(시연만으로는 안
 찬다). 파일로 남기는 것은 별개 노드(`pipe_report_node`)가 디스크에 한다.
+
+## 3D Map 은 세 칸이다 (ref_img/web_ui.jpg)
+
+| 칸 | 폭 | 내용 |
+|---|---|---|
+| 왼쪽 | 1.23fr | 3D 배관 맵 — 층마다 코스·지나온 선·결함 마커·**빨간 점** |
+| 가운데 | 1.42fr | 층별 상태 비교표 · 결함 현황 · 임무 지령 버튼(층마다 한 묶음) |
+| 오른쪽 | 0.85fr | 카메라 두 칸 — **위가 2층, 아래가 1층**(건물 순서 그대로) |
+
+🔑 **가운데가 맵보다 넓다**(2026-08-10 사용자 지시로 맵 1.85→1.23fr, 줄인 만큼
+가운데에 줬다). 맵은 배관망 전체를 담기만 하면 되는데, 정작 읽는 것은 층별
+숫자다 — 좁으면 `2705 / 270…` 처럼 잘려서 아무 쓸모가 없었다.
+
+🔑 맵 아래의 코스 길이·답파·결함 줄은 **없앴다**(같은 날). 같은 숫자가 바로
+옆 표에 있어서 두 벌이었다 — 한쪽만 고쳐지는 종류의 중복이다.
+
+🔑 가운데 상태 표는 **세로가 항목, 가로가 층**이다. Home 처럼 카드를 갈라
+놓으면 "어느 층이 처졌나" 를 눈으로 못 재는데, 같은 줄에 놓으면 진행 막대
+길이로 바로 보인다. 오른쪽 카메라만 위아래가 뒤집힌 이유는 **2층이 실제로
+위에 있어서**다 — 왼→오른쪽 규칙(1층 먼저)을 세로로 옮기면 건물과 거꾸로 선다.
+
+🔑 가운데·오른쪽 부속은 전부 남의 모듈을 끼운다: 상태·결함 표는
+`views/status.js` 의 `mountFloorPanels()`, 버튼은 `views/handling.js` 의
+`mountButtons(el, r, {compact:true})`, 카메라는 `views/camera.js` 의
+`mountCam()`. **여기에 또 만들지 말 것** — 조종석과 이 화면이 서로 다른
+말을 하기 시작한다.
+
+🚨 화면 한 판(창 높이)에 세 칸이 다 들어가야 한다. 가운데 칸이 넘치면 지령
+버튼이 스크롤 아래로 숨는데, "눌러야 할 것" 이 안 보이는 것이 제일 나쁘다 —
+카드 여백·글자를 줄여 맞춰 뒀다(1680×1000 실측으로 딱 맞는다). 창이
+1280px 보다 좁으면 세 칸을 세로로 푼다.

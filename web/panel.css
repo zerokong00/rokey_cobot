@@ -13,7 +13,10 @@ body{background:var(--bg);color:var(--fg);margin:0;
   display:flex;min-height:100vh}
 code,.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
 
-/* ── 사이드바 ───────────────────────────────────────────── */
+/* ── 사이드바 (지금은 안 쓴다) ──────────────────────────────
+   🔑 한 화면짜리로 줄이면서 index.html 에서 `<nav id="side">` 를 뺐다
+   (2026-08-10). 규칙은 남겨 둔다 — 페이지를 되살릴 때 app.js 의 ROUTES 와
+   index.html 만 돌려놓으면 되게. 없는 요소를 겨누는 규칙은 무해하다. */
 #side{width:220px;flex:0 0 220px;background:var(--panel);
   border-right:1px solid var(--line);display:flex;flex-direction:column;
   position:sticky;top:0;height:100vh}
@@ -29,17 +32,41 @@ code,.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
   fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
 #nav .badge{margin-left:auto;font-size:11px;background:var(--panel2);
   color:var(--muted);border-radius:9px;padding:1px 7px}
-#conn{margin:8px;padding:8px 10px;border-radius:7px;font-size:12px;
-  background:var(--panel2)}
-#conn.on{color:var(--ok)} #conn.off{color:var(--bad)}
 
 /* ── 본문 ───────────────────────────────────────────────── */
-#main{flex:1;min-width:0;padding:22px 26px 40px}
+#main{flex:1;min-width:0;padding:18px 26px 22px}
 #head{display:flex;align-items:baseline;gap:16px;flex-wrap:wrap;
-  margin-bottom:18px}
+  margin-bottom:14px}
+/* 연결 표시 — 사이드바에 있던 것을 머리말 오른쪽 끝으로 옮겼다 */
+#conn{margin-left:auto;padding:5px 11px;border-radius:9px;font-size:12px;
+  background:var(--panel2);align-self:center}
+#conn.on{color:var(--ok)} #conn.off{color:var(--bad)}
 #head h1{font-size:26px;font-weight:600;margin:0;letter-spacing:-.2px}
 .hstate{color:var(--muted);font-size:13px}
 .hstate .k{color:var(--fg)}
+/* 로봇이 여럿이면 머리말 한 줄에 층을 나란히 적는다 */
+.hstate .hl{color:var(--accent);font-weight:600}
+.hstate .hsep{margin:0 10px;color:var(--line)}
+
+/* ── 로봇별 칸 (Home · Robot Handling · Detect List · Camera · Event Log) ──
+   🔑 **왼쪽이 1층, 오른쪽이 2층.** 순서는 서버 명패(-p ns:=floor1,floor2)가
+   정하고 CSS 는 칸 수(--n)만 받아 나눈다. 한 대면 한 칸이라 예전 화면과
+   같아 보인다. 좁은 창에서는 세로로 쌓인다 — 층이 겹쳐 보이는 것보다 낫다. */
+.rcols{display:grid;gap:18px;align-items:start;
+  grid-template-columns:repeat(var(--n,1),minmax(0,1fr))}
+@media(max-width:1100px){.rcols{grid-template-columns:1fr}}
+.rcol{min-width:0;display:flex;flex-direction:column;gap:10px}
+.rhead{display:flex;align-items:baseline;gap:10px;padding-left:10px;
+  border-left:3px solid var(--accent)}
+.rcol:nth-child(2) .rhead{border-left-color:var(--ok)}
+.rcol:nth-child(3) .rhead{border-left-color:var(--warn)}
+.rname{font-size:17px;font-weight:700;letter-spacing:-.2px}
+.rns{font-size:12px;color:var(--muted)}
+.rbody{min-width:0;display:flex;flex-direction:column;gap:12px}
+/* 요약 카드의 첫 줄 — 상태 배지와 진행률을 한 줄에 마주 본다 */
+.sumhead{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.card h2 .cnt{float:right;font-weight:400;color:var(--muted);
+  text-transform:none;letter-spacing:0}
 
 /* ── 카드 ───────────────────────────────────────────────── */
 .cards{display:grid;gap:14px;
@@ -80,10 +107,10 @@ code,.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
 /* 카드 안에 끼울 때 — 테두리·배경을 카드에 맡긴다 */
 .cam.bare{border:0;background:transparent;border-radius:0}
 .cam.bare .capt{padding:0 0 9px}
-/* 🔑 조종석(Robot Handling)의 카메라 칸은 **폭 절반**이다. 카드 전체 폭이면
-   16:9 라 세로도 같이 커져서, 아래의 상태·사건 로그가 화면 밖으로 밀린다.
-   좁은 창에서는 min-width 가 이겨서 그냥 꽉 찬다. */
-#h-cam{max-width:50%;min-width:320px}
+/* 🔑 조종석·Home 의 카메라는 **로봇 칸 폭**을 그대로 쓴다. 예전에는 카드가
+   화면 전체 폭이라 16:9 세로가 너무 커져 상태·로그가 화면 밖으로 밀렸고,
+   그래서 max-width:50% 를 걸어 뒀었다 — 지금은 칸 자체가 층당 절반이라
+   그 제약이 필요 없다(한 대일 때만 전체 폭이 되는데 그때는 아래가 짧다). */
 .cam{background:var(--panel);border:1px solid var(--line);border-radius:10px;
   overflow:hidden;display:flex;flex-direction:column}
 .cam .capt{display:flex;align-items:center;gap:8px;padding:10px 14px;
@@ -109,10 +136,85 @@ code,.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
    없음" 이 영상 위에 그대로 떠 있었다. 되살리려면 이 한 줄이 필요하다. */
 .cam .nosig[hidden]{display:none}
 
-/* ── 3D 맵 ──────────────────────────────────────────────── */
+/* ── 3D Map 페이지 — 세 칸 (ref_img/web_ui.jpg) ──────────────
+   왼쪽 3D 맵 · 가운데 층별 상태/결함/지령 · 오른쪽 카메라 2칸.
+   🔑 **화면 한 판에 다 들어가야 한다** — 관제실에서 스크롤을 내리며 보는
+   화면이 아니다. 그래서 격자 높이를 창 높이에 묶는다(빼는 94px 은 본문 패딩
+   18+22 과 머리글 54 의 실측 합 — 사이드바를 걷어내며 다시 쟀다).
+   좁은 창(≤1280px)에서는 세 칸을 세로로 푼다 — 셋을 다 우겨넣으면 맵이
+   손바닥만 해져서 아무 쓸모가 없다. */
+/* 🔑 폭은 두 번에 걸쳐 이렇게 왔다 (합은 늘 3.5fr — 한 칸을 줄이면 그만큼
+   다른 칸이 받는다). 사용자 지시 2026-08-10:
+     ① 맵 1.85 → **1.23**(2/3), 줄인 0.62 를 가운데 상태 칸에 (0.80 → 1.42)
+        — 맵은 배관망을 담기만 하면 되는데 층별 숫자가 잘렸다(`2705 / 270…`).
+     ② 가운데 1.42 → **0.95**(2/3), 줄인 0.47 을 카메라 칸에 (0.85 → 1.32)
+        — 표는 이미 넉넉해졌고, 정작 작았던 것은 카메라 그림이다. */
+.m3{display:grid;gap:14px;height:calc(100vh - 94px);min-height:560px;
+  grid-template-columns:minmax(0,1.23fr) minmax(300px,.95fr)
+                        minmax(300px,1.32fr)}
+.m3>div{min-width:0;display:flex;flex-direction:column;gap:12px}
+.m3-mid,.m3-cam{overflow-y:auto;padding-right:2px}
+.m3-map{min-height:0}
+.m3-map .legend{margin:0}
+/* 🔑 가운데 칸은 **한 화면에 세 카드가 다 들어가야** 한다(상태·결함·지령).
+   그래서 카드 안쪽 여백과 글자를 한 단계씩 줄인다 — 지령 버튼이 스크롤
+   아래로 내려가면 "눌러야 할 것" 이 안 보인다. */
+.m3-mid .card{padding:10px 13px}
+.m3-mid .card h2{margin-bottom:7px}
+.m3-mid .fstat th,.m3-mid .fstat td{padding:5px 6px}
+/* 가운데 칸의 지령 — 층마다 한 묶음 */
+.cmdgrp{border-top:1px solid var(--line);padding-top:6px;margin-top:6px}
+.cmdgrp:first-child{border-top:0;padding-top:0;margin-top:0}
+.cmdgrp .glab{font-size:12px;font-weight:700;color:var(--accent);
+  margin-bottom:4px}
+.cmdgrp .btns{gap:7px}
+.cmdgrp .btns button{padding:6px 10px;font-size:12.5px}
+.cmdgrp .b-run{min-width:8em}
+.cmdgrp .toast{margin-top:7px;font-size:12px}
+/* 오른쪽 카메라 칸 — 제목 줄을 얇게 (그림에 자리를 준다) */
+.camcard h2{margin-bottom:8px}
+.camcard .camwhen{font-weight:400;text-transform:none;letter-spacing:0}
+/* 🔑 카메라 두 칸이 **칸 높이를 반씩 나눠 갖는다.** 16:9 로 고정하면 칸이
+   넓어질수록 세로도 같이 커져서 아래 칸(1층)이 화면 밖으로 밀린다 — 실측
+   2026-08-10(사이드바를 걷어내 칸이 넓어지자 바로 드러났다). 그림은
+   `object-fit:contain` 이라 어떤 상자에 넣어도 비율이 안 깨진다. */
+.m3>.m3-cam{overflow:hidden}
+.m3-cam .camcard{flex:1 1 0;min-height:180px;display:flex;
+  flex-direction:column}
+.m3-cam .camcard .cam{flex:1;min-height:0}
+.m3-cam .camcard .fr{flex:1;min-height:0;aspect-ratio:auto}
+@media(max-width:1280px){
+  .m3{grid-template-columns:1fr;height:auto}
+  .m3-mid,.m3-cam{overflow:visible}
+  /* 🚨 `.m3>div` 가 특이도(0,1,1)로 더 세다 — 자식 선택자로 받아야 display 가
+     실제로 grid 가 된다(안 그러면 카메라가 세로로만 쌓인다). */
+  .m3>.m3-cam{display:grid;gap:12px;align-content:start;
+    grid-template-columns:repeat(auto-fit,minmax(300px,1fr))}
+  .m3-map #map3d{flex:none;height:62vh}
+}
+
+/* 층별 비교표 — 세로가 항목, 가로가 층 */
+.fstat{width:100%;border-collapse:collapse;font-size:13px}
+.fstat th,.fstat td{border-bottom:1px solid var(--line);padding:6px 6px;
+  text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+.fstat thead th{color:var(--accent);font-size:12px;font-weight:700;
+  text-align:right}
+.fstat thead th:first-child{width:34%}
+.fstat th.lbl{color:var(--muted);font-weight:400;text-align:left}
+.fstat tr:last-child th,.fstat tr:last-child td{border-bottom:0}
+.fstat td{max-width:0;overflow:hidden;text-overflow:ellipsis}
+/* 진행 칸 — 숫자 + 가는 막대를 한 줄에 */
+.fstat .pw{display:flex;align-items:center;gap:7px;justify-content:flex-end}
+.fstat .pw .bar{margin:0;flex:1;min-width:36px;height:5px}
+
+/* ── 3D 맵 캔버스 ───────────────────────────────────────── */
+/* 🔑 맵 칸은 **왼쪽 칸의 남는 높이를 전부 먹는다**(위 범례와 아래 코스 줄을
+   빼고). 캔버스 백버퍼는 map3d.js 의 ResizeObserver 가 이 칸 크기에 맞춰
+   다시 잡는다 — 늘리기만 하면 960×460 짜리가 늘어나 흐려진다. */
 #map3d{position:relative;background:#000;border:1px solid var(--line);
-  border-radius:10px;overflow:hidden;cursor:grab;touch-action:none}
-#map3d canvas{display:block;width:100%}
+  border-radius:10px;overflow:hidden;cursor:grab;touch-action:none;
+  flex:1;min-height:360px}
+#map3d canvas{display:block;width:100%;height:100%}
 #labels{position:absolute;inset:0;pointer-events:none;overflow:hidden}
 #labels .lab{position:absolute;font:11px ui-monospace,monospace;
   white-space:nowrap;transform:translate(0,-50%)}
@@ -130,15 +232,17 @@ button:hover{background:var(--hi)}
 button:disabled{opacity:.45;cursor:not-allowed}
 button:disabled:hover{background:var(--panel2)}
 /* ▶ 시작 / ⏸ 정지 토글 — `.go` 가 붙으면 "누르면 움직인다"(초록).
-   글자 수가 바뀌어도 옆 버튼이 안 밀리게 폭을 잡아 둔다. */
-#b-run{min-width:9.5em}
-#b-run.go{border-color:#2f6a4a;color:#8ed9ae}
-#b-forward{border-color:#2f5a7a;color:#8ec4e0}
-#b-estop{border-color:#7a3030;color:#f09090}
-#b-release{border-color:#6a5a2a;color:#e0c07a}
+   글자 수가 바뀌어도 옆 버튼이 안 밀리게 폭을 잡아 둔다.
+   🔑 id 가 아니라 class 다 — 조종석이 **로봇마다 한 벌씩** 서므로 같은
+   버튼이 화면에 둘 이상 있다(id 는 문서에 하나여야 한다). */
+.b-run{min-width:9.5em}
+.b-run.go{border-color:#2f6a4a;color:#8ed9ae}
+.b-forward{border-color:#2f5a7a;color:#8ec4e0}
+.b-estop{border-color:#7a3030;color:#f09090}
+.b-release{border-color:#6a5a2a;color:#e0c07a}
 input[type=range]{vertical-align:middle;accent-color:var(--accent)}
 #speedv{display:inline-block;min-width:5.5em;font-variant-numeric:tabular-nums}
-#toast{margin-top:12px;min-height:1.3em;font-size:13px;color:var(--warn)}
+.toast{margin-top:12px;min-height:1.3em;font-size:13px;color:var(--warn)}
 
 /* ── 표 / 로그 ──────────────────────────────────────────── */
 table{width:100%;border-collapse:collapse;font-size:13px}

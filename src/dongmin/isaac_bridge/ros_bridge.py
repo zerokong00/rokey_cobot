@@ -99,6 +99,23 @@ def _quat_x(deg):
     return math.sin(h), 0.0, 0.0, math.cos(h)
 
 
+def _mesh_z_shift(path):
+    """이미 구워 둔 `.webmesh` 가 **어느 층 프레임**으로 구워졌는지. 모르면 None.
+
+    앞 4바이트 길이 + 그만큼의 JSON 헤더만 읽는다(포맷은 usd_to_webmesh.py).
+    5MB 를 통째로 파싱하지 않는다.
+    """
+    import json as _json
+    try:
+        with open(path, "rb") as f:
+            n = int.from_bytes(f.read(4), "little")
+            hdr = _json.loads(f.read(n).decode("utf-8"))
+        z = hdr.get("z_shift_mm")
+        return None if z is None else float(z)
+    except Exception:
+        return None
+
+
 class RobotPub:
     """로봇 한 대의 발행자. 네임스페이스 하나를 갖는다."""
 
@@ -327,12 +344,18 @@ class RobotPub:
             except Exception:
                 pass          # 관절 발행은 보조 신호다 — 실패해도 주행은 간다
 
-    def publish_course(self, pts_m, *, ir_m, bend_r_m=0.0):
+    def publish_course(self, pts_m, *, ir_m, bend_r_m=0.0, z_shift_mm=None):
         """코스 중심선 표본을 **한 번** 발행한다 (기동 직후).
         pts_m = [[s,x,y,z], ...] (전부 m) — 규약은 contract.course() 참조.
-        latched 라 재발행이 필요 없다. 웹 3D 맵이 이걸로 관을 그린다."""
+        latched 라 재발행이 필요 없다. 웹 3D 맵이 이걸로 관을 그린다.
+
+        🚨 로봇이 여러 대(층별 동시 주행)면 `z_shift_mm` 을 같이 준다 —
+           `publish_mesh` 에 주는 것과 **같은 값**(`-Z_NET`). 층마다 월드
+           프레임이 다르므로, 이게 없으면 관제 3D 맵이 두 대를 2.49m
+           어긋난 자리에 그린다."""
         from std_msgs.msg import String
-        d = contract.course(self.ns, pts_m, ir_m=ir_m, bend_r_m=bend_r_m)
+        d = contract.course(self.ns, pts_m, ir_m=ir_m, bend_r_m=bend_r_m,
+                            z_shift_mm=z_shift_mm)
         self.p_course.publish(String(data=contract.dumps(d)))
         print(f"[ROS] {self.ns}: 코스 발행 — 표본 {len(d['pts'])}개, "
               f"총 {d['s_total_m'] * 1000:.0f}mm, 내반경 {ir_m * 1000:.0f}mm")
@@ -360,9 +383,18 @@ class RobotPub:
         out = _Path(webmesh)
         if usd is not None:
             usd = _Path(usd)
+            # 🚨 낡음 판정에 **z 오프셋도 넣는다**(2026-08-10). 예전에는 mtime
+            #    만 봐서, floor1 로 한 번 굽고 나면 `--course floor2` 로 돌려도
+            #    **floor1 프레임 메시를 그대로 보냈다** — 웹 3D 맵에 건물이
+            #    2.49m 어긋난 채 그려지고(로봇이 남의 층 배관 속을 달린다)
+            #    에러는 하나도 안 난다. 실측 2026-08-10: floor2 로 띄웠는데
+            #    받은 메시 헤더가 z=+2740.2(floor1) 였다.
+            baked_z = _mesh_z_shift(out)
             stale = (not out.is_file()
                      or (usd.is_file()
-                         and out.stat().st_mtime < usd.stat().st_mtime))
+                         and out.stat().st_mtime < usd.stat().st_mtime)
+                     or (z_shift_mm is not None and baked_z is not None
+                         and abs(baked_z - float(z_shift_mm)) > 0.01))
             if stale and usd.is_file():
                 try:
                     import importlib.util
