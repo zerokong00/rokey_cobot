@@ -216,42 +216,6 @@ class YoloSegDetector:
             detections.append(SegDetection(class_id, str(self.model.names[class_id]), confidence, xyxy, center, int(mask.sum()), depth_m, polygon, mask, measurement))
         return detections
 
-    def infer_rgb_only(self, rgb, raw_scores_out=None):
-        """Depth 없이 RGB만으로 결함을 검출한다 — 물리 치수(길이/폭)는 측정하지 않는
-        2차 검증 전용 경로다(카메라가 계속 바뀌는 active_cam처럼 Depth 짝이 없는
-        스트림용, 2026-08-07).
-
-        raw_scores_out: 리스트를 넘기면 등록 문턱(registration_confidence) 통과
-        여부와 무관하게 이번 프레임의 모든 (class_name, confidence)를 채워준다
-        — "신뢰도가 문턱 바로 아래라 걸러진 것"과 "아예 신호가 없는 것"을
-        구분하기 위한 임시 디버그용."""
-        result = self.model.predict(source=rgb, conf=self.inference_confidence, device=self.device, verbose=False, save=False)[0]
-        if raw_scores_out is not None:
-            raw_scores_out.clear()
-        if result.boxes is None or result.masks is None:
-            return []
-        detections = []
-        height, width = rgb.shape[:2]
-        polygons = result.masks.xy
-        no_depth = invalid_measurement(0, 0.0, "rgb_only_no_depth")
-        for index, box in enumerate(result.boxes):
-            confidence = float(box.conf[0])
-            class_id = int(box.cls[0])
-            if raw_scores_out is not None:
-                raw_scores_out.append((str(self.model.names[class_id]), confidence))
-            if confidence < self.registration_confidence or index >= len(polygons):
-                continue
-            polygon = np.asarray(polygons[index], dtype=np.float32)
-            if polygon.shape[0] < 3:
-                continue
-            mask = np.zeros((height, width), dtype=np.uint8)
-            cv2.fillPoly(mask, [np.round(polygon).astype(np.int32)], 1)
-            mask = mask.astype(bool)
-            xyxy = tuple(float(value) for value in box.xyxy[0].tolist())
-            center = ((xyxy[0] + xyxy[2]) * 0.5, (xyxy[1] + xyxy[3]) * 0.5)
-            detections.append(SegDetection(class_id, str(self.model.names[class_id]), confidence, xyxy, center, int(mask.sum()), float("nan"), polygon, mask, no_depth))
-        return detections
-
     def draw(self, rgb, detections):
         """RGB 영상에 결함 mask·박스·클래스·신뢰도·Depth를 표시한다."""
         image = rgb.copy()

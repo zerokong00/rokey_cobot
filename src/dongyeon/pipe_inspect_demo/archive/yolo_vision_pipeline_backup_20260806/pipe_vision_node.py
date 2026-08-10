@@ -75,7 +75,6 @@ class PipeVisionNode(Node):
         self.synchronizer.registerCallback(self._on_sensor_bundle)
         self._missing_position_warned = False
         self.report_frozen = False
-        self.last_debug_detections = []  # 결함이 화면 밖으로 나가도 디버그 표시는 유지(JSON 발행과는 무관)
         self.get_logger().info(f"파이프 YOLO Seg 노드 시작: model={model_path}, classes={self.detector.class_names}")
 
     def _on_reset(self, message):
@@ -84,7 +83,6 @@ class PipeVisionNode(Node):
             return
         self.tracker.reset()
         self.report_frozen = False
-        self.last_debug_detections = []
         self.sensor_status = {key: False for key in self.sensor_status}
         self.get_logger().info("검사 추적 상태 초기화 완료")
 
@@ -108,14 +106,8 @@ class PipeVisionNode(Node):
         except (ValueError, RuntimeError) as error:
             self.get_logger().warn(str(error), throttle_duration_sec=5.0)
             return
-        if detections:
-            self.last_debug_detections = detections
         if self.publish_debug:
-            # 🚨 화면(overlay)은 마지막으로 본 결함을 계속 그린다 — 결함이
-            #    프레임 밖으로 나가도 뷰어가 빈 화면으로 돌아가지 않는다.
-            #    JSON/등록(report)은 그대로 **이번 프레임 실측 detections만**
-            #    쓴다(아래) — 표시 지속과 결함 재등록/재발행은 서로 무관하다.
-            self.debug_pub.publish(rgb_to_compressed_image(self.detector.draw(rgb, self.last_debug_detections), rgb_msg))
+            self.debug_pub.publish(rgb_to_compressed_image(self.detector.draw(rgb, detections), rgb_msg))
         if self.report_frozen:
             return
         if not detections:

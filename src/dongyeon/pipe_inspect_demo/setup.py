@@ -24,9 +24,11 @@ setup(
     entry_points={
         "console_scripts": [
             "pipe_vision = pipe_inspect_demo.pipe_vision_node:main",
+            "active_cam_vision = pipe_inspect_demo.active_cam_vision_node:main",
             "pipe_report = pipe_inspect_demo.pipe_report_node:main",
             "pipe_coordinator = pipe_inspect_demo.pipe_coordinator_node:main",
             "yolo_viewer = pipe_inspect_demo.yolo_debug_viewer:main",
+            "view_active_cam = pipe_inspect_demo.view_active_cam_node:main",
             "repair_target_test = pipe_inspect_demo.repair_target_test_node:main",
         ],
     },
