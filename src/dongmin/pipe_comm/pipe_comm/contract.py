@@ -15,11 +15,19 @@
    베껴 적으면 반드시 갈라지므로(이미 팀 안에서 `/rgb` `front/rgb`
    `/rgb/compressed` 세 갈래로 갈렸다), 이 파일 하나만 양쪽이 읽는다.
 
-   Isaac 쪽(3.11)에서 쓰는 법 — 설치 없이 소스를 그대로 읽는다:
+   Isaac 쪽(3.11)에서 쓰는 법 — 설치 없이 소스를 그대로 읽는다.
+   🚨 절대경로를 박지 말 것. 워크스페이스 위치는 PC 마다 다르다:
 
        import sys
-       sys.path.insert(0, "/home/ubuntu/cobot3_ws/src/dongmin/pipe_comm")
+       from pathlib import Path
+       # <ws>/src/son/xxx.py 에서 <ws>/src/dongmin/pipe_comm 을 찾는다
+       WS = Path(__file__).resolve().parents[2]        # src/ 의 부모
+       sys.path.insert(0, str(WS / "src" / "dongmin" / "pipe_comm"))
        from pipe_comm.contract import Topics, drive_state, event
+
+   또는 환경변수로 — 레이아웃이 달라도 견딘다:
+
+       sys.path.insert(0, os.environ["PIPE_COMM_DIR"])
 
    ROS 노드 쪽(3.10)은 colcon 으로 설치된 것을 그냥 import 한다.
 
@@ -56,7 +64,8 @@
       카메라 RGB           rgb/compressed        pipe_comm/camera_monitor
       카메라 Depth         depth/compressed      dongyeon/pipe_vision_node
       카메라 내부파라미터  camera_info                 └ YOLO 결함 검출
-      후방 카메라          rear/rgb/compressed
+      후방 카메라          rear/rgb/compressed   pipe_comm/web_panel Camera 화면
+      토치 카메라          torch/rgb/compressed        └ 용접부 근접
                           ── 상태 ──────────▶
       주행 오도메트리      odom                  pipe_comm/drive_monitor
       IMU(롤·요)          imu                   son/localization/node.py
@@ -65,6 +74,9 @@
       주행/정지 플래그     moving  (Bool)        pipe_comm/drive_monitor
       FSM 상태 10Hz        drive_state (JSON)          └ 사람이 보는 콘솔
       1회성 사건           event  (JSON)         dongyeon/pipe_coordinator
+      코스 중심선(latched) course (JSON)         pipe_comm/web_panel 3D 맵
+      CAD 메시(latched)    mesh (UInt8MultiArray) pipe_comm/web_panel 3D 맵
+                                                       └ 맵 .webmesh, 0.8MB 1회
                           ◀── 지령 ──────────
       주행 속도            cmd_vel (Twist)       pipe_comm/mission_cli
       임무 지령            mission (JSON)        son/driver/node.py
@@ -100,6 +112,8 @@ RELATIVE = {
     "camera_info": "camera_info",            # sensor_msgs/CameraInfo
     "rear_rgb": "rear/rgb/compressed",       # sensor_msgs/CompressedImage
     "rear_camera_info": "rear/camera_info",  # sensor_msgs/CameraInfo
+    "torch_rgb": "torch/rgb/compressed",     # sensor_msgs/CompressedImage
+    "torch_camera_info": "torch/camera_info",  # sensor_msgs/CameraInfo
     # ── Isaac → ROS 노드 : 상태 ────────────────────────────────────────
     "odom": "odom",                          # nav_msgs/Odometry
     "imu": "imu",                            # sensor_msgs/Imu
@@ -108,6 +122,8 @@ RELATIVE = {
     "moving": "moving",                      # std_msgs/Bool    주행 중인가
     "drive_state": "drive_state",            # std_msgs/String  JSON, 10Hz
     "event": "event",                        # std_msgs/String  JSON, 사건 때만
+    "course": "course",                      # std_msgs/String  JSON, latched 1회
+    "mesh": "mesh",                          # std_msgs/UInt8MultiArray  .webmesh, latched 1회
     # ── ROS 노드 → Isaac : 지령 ────────────────────────────────────────
     "cmd_vel": "cmd_vel",                    # geometry_msgs/Twist  linear.x 만
     "mission": "mission",                    # std_msgs/String  JSON
@@ -149,6 +165,7 @@ class Topics:
 # ── 프레임 이름 (CameraInfo.header.frame_id, Odometry 의 child_frame_id) ──
 FRAME_FRONT_CAM = "front_camera"
 FRAME_REAR_CAM = "rear_camera"
+FRAME_TORCH_CAM = "torch_camera"   # 토치 링에 달린 용접부 근접 카메라
 FRAME_BASE = "base_link"
 FRAME_PIPE = "pipe"          # 관 중심선을 따라가는 좌표계. odom 의 부모다
 
@@ -199,11 +216,16 @@ EV_ALERT = (EV_OFF_COURSE, EV_DISCONNECT, EV_ESTOP, EV_STUCK)
 CMD_START = "START"            # 주행 시작 / 재개
 CMD_STOP = "STOP"              # 정지 (HOLD). 재개 가능
 CMD_RECALL = "RECALL"          # 복귀 — 방향을 뒤집어 출발점으로
+CMD_FORWARD = "FORWARD"        # 복귀 취소 — 다시 전진하며 점검한다
 CMD_RETRY = "RETRY"            # 끼임 탈출 재시도 (방향 전환)
 CMD_SPEED = "SPEED"            # 주행 속도 변경. `mps` 를 같이 준다
 CMD_ESTOP = "ESTOP"            # 비상 정지 — 재개 불가, 사람이 풀어야 한다
 
-COMMANDS = (CMD_START, CMD_STOP, CMD_RECALL, CMD_RETRY, CMD_SPEED, CMD_ESTOP)
+# 🔑 RECALL 의 짝은 START 가 아니라 FORWARD 다. START 는 "서 있던 것을 다시
+#    간다" 일 뿐 **방향을 안 바꾼다** — 복귀 중에 START 를 눌러도 계속 뒤로
+#    간다. 앞으로 돌려세우는 지령이 따로 있어야 한다(2026-08-08 추가).
+COMMANDS = (CMD_START, CMD_STOP, CMD_RECALL, CMD_FORWARD, CMD_RETRY,
+            CMD_SPEED, CMD_ESTOP)
 
 
 # ── JSON 직렬화 ────────────────────────────────────────────────────
@@ -267,6 +289,26 @@ def mission(cmd, *, mps=None, reason="", t=None):
     return d
 
 
+def course(ns, pts_m, *, ir_m, bend_r_m=0.0, t=None):
+    """코스 중심선 표본 — 시연이 기동할 때 **한 번** latched 로 발행한다.
+    `Topics.COURSE` + `latched_qos()`.
+
+    pts_m      [[s, x, y, z], ...] — 호길이 s 와 월드 좌표(전부 **m**).
+               s 오름차순, 간격 불균일 허용(직선은 성기게, 곡관은 조밀하게).
+    ir_m       관 내반경(m). 웹이 관 튜브·벽면 좌표(시계각)를 그릴 때 쓴다.
+
+    🔑 이것이 있기 전에는 web_panel JS 에 코너 좌표가 하드코딩되어 있어서
+       맵이 바뀌면 시연 코드와 웹을 **따로** 고쳐야 했다. 이제 기하의 단일
+       출처는 시연 쪽 CenterLine 하나다 — 웹은 받은 표본을 그대로 그린다.
+    """
+    pts = [[round(float(v), 4) for v in p] for p in pts_m]
+    if any(len(p) != 4 for p in pts):
+        raise ValueError("pts_m 은 [s,x,y,z] 의 목록이어야 한다")
+    return {"stamp": _stamp(t), "robot": ns, "ir_m": round(float(ir_m), 4),
+            "bend_r_m": round(float(bend_r_m), 4),
+            "s_total_m": pts[-1][0] if pts else 0.0, "pts": pts}
+
+
 def repair_target(defect_id, *, s_mm, clock_deg, width_mm=0.0, depth_mm=0.0,
                   confidence=1.0, t=None):
     """ROS 노드 → Isaac 수리 대상.  `Topics.REPAIR_TARGET`.
@@ -318,3 +360,59 @@ def command_qos(depth=10):
     from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
     return QoSProfile(reliability=ReliabilityPolicy.RELIABLE,
                       history=HistoryPolicy.KEEP_LAST, depth=depth)
+
+
+def latched_qos():
+    """1회성 선언용(코스 기하 등). TRANSIENT_LOCAL — 발행이 구독보다 먼저라도
+    나중에 붙은 구독자가 마지막 값을 받는다. **양쪽이 같이 써야 한다** —
+    구독만 TRANSIENT_LOCAL 이고 발행이 VOLATILE 이면 못 받는다(반대는 된다)."""
+    from rclpy.qos import (DurabilityPolicy, HistoryPolicy, QoSProfile,
+                           ReliabilityPolicy)
+    return QoSProfile(reliability=ReliabilityPolicy.RELIABLE,
+                      durability=DurabilityPolicy.TRANSIENT_LOCAL,
+                      history=HistoryPolicy.KEEP_LAST, depth=1)
+
+
+# ── 환경 점검 ──────────────────────────────────────────────────────
+
+def check_env():
+    """도메인·미들웨어가 팀 값과 맞는지 본다.  [(심각도, 문구), ...] 를 돌려준다.
+
+    🚨 **이 셋이 틀리면 에러가 안 난다.** 노드는 멀쩡히 뜨고 토픽 목록도
+       비어 있지 않은데 데이터만 영영 안 온다 — 원인을 찾는 데 제일 오래
+       걸리는 부류다. 그래서 각 노드가 기동할 때 이걸 불러 먼저 찍는다.
+
+    ROS 를 import 하지 않으므로(환경변수만 본다) 3.11 Isaac 쪽에서도 쓸 수 있다.
+    """
+    import os
+    out = []
+
+    dom = os.environ.get("ROS_DOMAIN_ID")
+    if dom is None:
+        out.append(("error", f"ROS_DOMAIN_ID 가 설정되지 않았다 (기본 0 으로 "
+                             f"동작한다). `export ROS_DOMAIN_ID="
+                             f"{ROS_DOMAIN_ID}` 할 것"))
+    elif dom.strip() != str(ROS_DOMAIN_ID):
+        out.append(("error", f"ROS_DOMAIN_ID={dom} 인데 팀 값은 "
+                             f"{ROS_DOMAIN_ID} 다 — 상대 토픽이 안 보인다"))
+
+    rmw = os.environ.get("RMW_IMPLEMENTATION")
+    if rmw is None:
+        out.append(("warn", "RMW_IMPLEMENTATION 이 없다 — 양쪽이 같은 구현이어야 "
+                            "서로를 찾는다. `export RMW_IMPLEMENTATION="
+                            "rmw_fastrtps_cpp` 를 권한다"))
+    elif rmw != "rmw_fastrtps_cpp":
+        out.append(("warn", f"RMW_IMPLEMENTATION={rmw} — Isaac 쪽은 "
+                            f"rmw_fastrtps_cpp 다. 다르면 서로 못 찾는다"))
+
+    if os.environ.get("ROS_LOCALHOST_ONLY") == "1":
+        out.append(("warn", "ROS_LOCALHOST_ONLY=1 — 다른 PC 와는 통신하지 "
+                            "않는다 (한 PC 안이면 문제없다)"))
+
+    return out
+
+
+def log_env(logger):
+    """`check_env()` 결과를 rclpy 로거로 찍는다. 노드 기동 때 한 번 부른다."""
+    for level, msg in check_env():
+        (logger.error if level == "error" else logger.warn)(f"[환경] {msg}")

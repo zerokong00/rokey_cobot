@@ -127,6 +127,7 @@ class DriveMonitor(Node):
 
         self.create_timer(float(self.get_parameter("period_sec").value),
                           self._report)
+        contract.log_env(self.get_logger())
         self.get_logger().info(
             f"주행 감시 시작 — 로봇 {len(names)}대 {names} "
             f"(domain {contract.ROS_DOMAIN_ID}, 두절 판정 {self.timeout:.0f}초)")

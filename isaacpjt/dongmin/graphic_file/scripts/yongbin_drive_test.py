@@ -15,9 +15,34 @@ yongbin_assembly_view.py(정적 조립)의 물리 버전. 답해야 하는 질�
   12 + 40·sin(θ) + 10 = 50  →  θ = 44.43°  →  조인트 +1.13°
 정착 후 조인트가 이 근처(한계 안)면 "밀착", 상한 +14.9° 에 붙어 있으면 "떠 있음".
 
-실행:
-  PYTHONUNBUFFERED=1 isaac_python yongbin_drive_test.py --headless
-  PYTHONUNBUFFERED=1 isaac_python yongbin_drive_test.py            # GUI
+실행 — 🚨 **이 서버에는 디스플레이가 없다. 화면은 WebRTC 로 본다.**
+
+  PYTHONUNBUFFERED=1 isaac_python yongbin_drive_test.py            # 화면 있음
+  PYTHONUNBUFFERED=1 isaac_python yongbin_drive_test.py --headless # 수치만
+  PYTHONUNBUFFERED=1 isaac_python yongbin_drive_test.py --elbow --water
+
+스크립트는 고칠 게 없다. `isaac_python`(~/.bashrc 의 함수)이 PYTHONPATH 앞에
+`tools/isaac_autostream` 을 끼우고, 거기 `sitecustomize.py` 가 `SimulationApp`
+을 가로채 **창 없이(headless=True) UI 만 살려**(hide_ui=False) WebRTC 를 켠다.
+그래서 아래 `SimulationApp({"headless": HEADLESS})` 의 값은 덮어써진다 — 창을
+만들려 시도하지 않으므로 디스플레이 없이도 안 죽는다.
+
+🚨 **`--headless` 를 주면 화면이 멎는다.** 그 플래그는 `world.step(render=False)`
+   라 렌더 자체가 안 돈다 — 스트리밍은 붙는데 뷰포트가 얼어 있다. 볼 거면 빼자.
+🚨 **WebRTC 는 한 번에 하나다** (TCP 49100). 다른 Isaac 이 떠 있으면
+   자동스트리밍이 `건너뜀` 을 찍고 화면이 안 뜬다 — 시그널링 소켓이
+   SO_REUSEPORT 라 **오류 없이** 둘 다 리슨해서 접속이 반씩 갈리기 때문이다.
+       pgrep -af isaacsim_venv/bin/python     # 먼저 확인하고 띄울 것
+🚨 **브라우저로는 못 본다.** 49100 은 웹페이지가 아니라 WebSocket 시그널링이다.
+   NVIDIA 의 **Isaac Sim WebRTC Streaming Client** 앱 주소 칸에 **IP 만** 넣는다
+   (포트도 http:// 도 붙이지 않는다). 보안그룹에 TCP 49100 + UDP 47998-48020.
+   기동 로그의 `[자동스트리밍] WebRTC 엔드포인트: <IP>` 줄이 그 주소다.
+
+  일반 `python` 으로 띄우면 안 된다 — 가로채기가 없어 `headless=False` 가 그대로
+  먹고 IWindowing 획득 실패로 즉시 죽는다. 스트리밍만 끄려면
+  `ISAAC_STREAM=0 isaac_python ...` 로 끈다(산출물만 뽑는 배치용).
+
+물 입자(--water)를 어떻게 표현했는지는 옆의 `WATER_PARTICLES.md` 참고.
 """
 
 import sys
@@ -66,8 +91,17 @@ from omni.physx.scripts import particleUtils
 from pxr import (Gf, PhysxSchema, Sdf, Usd, UsdGeom, UsdLux, UsdPhysics,
                  UsdShade, Vt)
 
-SRC = Path("/home/rokey/Downloads/yongbin")
-META = json.loads((SRC / "parts_meta.json").read_text())
+# 부품 USD: ../assets/{robot,pipe}/ — src/son/legacy/meshes STL 을 mm 그대로
+# 변환한 것(스케일·회전은 이 스크립트가 참조 시점에 건다). 치수 메타는
+# son 정본을 공유한다
+_ASSETS = Path(__file__).resolve().parents[1] / "assets"
+_WS = Path(__file__).resolve().parents[4]
+META = json.loads((_WS / "src/son/spec/parts_meta.json").read_text())
+
+
+def _asset(usd_name):
+    sub = "pipe" if usd_name.startswith("pipe_") else "robot"
+    return str(_ASSETS / sub / usd_name)
 MM = 0.001
 
 # ── 조립 치수 (meta + 실측) ──
@@ -379,7 +413,7 @@ def make_link(path, matrix, usd_name, mass, approx, material=None,
     UsdPhysics.MassAPI.Apply(prim).CreateMassAttr(mass)
     vis = UsdGeom.Xform.Define(stage, path + "/visual")
     vis.AddScaleOp().Set(Gf.Vec3f(MM, MM, MM))
-    vis.GetPrim().GetReferences().AddReference(str(SRC / usd_name))
+    vis.GetPrim().GetReferences().AddReference(_asset(usd_name))
     if cylinder is not None:
         # 시각 메시는 그대로, 충돌체만 원통 프리미티브 (축 = 로컬 Y)
         cyl = UsdGeom.Cylinder.Define(stage, path + "/collider")
@@ -420,7 +454,7 @@ make_link(f"{ROBOT}/body_rear", M_BR, "body_rear.usd", MASS_BODY, "convexHull")
 bel = UsdGeom.Xform.Define(stage, f"{ROBOT}/body_front/bellows_visual")
 bel.AddTransformOp().Set(
     Gf.Matrix4d(1.0).SetScale(Gf.Vec3d(MM, MM, MM)) * rx(90.0) * M_BF.GetInverse())
-bel.GetPrim().GetReferences().AddReference(str(SRC / "bellows.usd"))
+bel.GetPrim().GetReferences().AddReference(_asset("bellows.usd"))
 
 arm_specs = []          # (tag, body_path, M_body, M_arm, M_wheel)
 wheel_drives = []       # 주행 시작 시 목표 속도를 넣을 드라이브들
@@ -541,7 +575,7 @@ if ELBOW:
 for name, usd, m in _pipe_parts:
     xf = UsdGeom.Xform.Define(stage, f"/World/Pipe/{name}")
     xf.AddTransformOp().Set(m)
-    xf.GetPrim().GetReferences().AddReference(str(SRC / usd))
+    xf.GetPrim().GetReferences().AddReference(_asset(usd))
 
 # 유리 재질 — 밖에서 로봇·물이 보이게. displayOpacity 프림바 방식은 RTX
 # 뷰포트에서 안 먹히는 경우가 있어 water_particle_demo 에서 검증된

@@ -120,16 +120,43 @@ def draw_judgement(frame_bgr, judgement):
     joint_deg = judgement.get("joint_deg")
     if cond is not None or joint_deg is not None:
         y = 48
+        # 🚨 2026-08-10 — curve_ahead(관절 비틀림이 문턱을 넘어 원형도 판정을
+        #    건너뛴 시점)의 근거를 화면에 남긴다(사용자 지시). 이때
+        #    circularity/roughness 는 detector.run() 이 재지 않고 0.0 그대로
+        #    돌려준 값이라(위 조기 반환) 그대로 보여주면 "실측 0"으로
+        #    오해하기 쉽다 — 대신 문턱 비교식을 보여준다.
+        curve_ahead = bool(cond.get("curve_ahead")) if cond is not None else False
+        if curve_ahead:
+            # 텍스트만으로는 눈에 잘 안 띈다는 지적(사용자) — 화면 전체에
+            # 굵은 테두리를 둘러 프레임 단위로 한눈에 보이게 한다.
+            fh, fw = img.shape[:2]
+            cv2.rectangle(img, (0, 0), (fw - 1, fh - 1), (0, 140, 255), 8)
         if joint_deg is not None:
-            _label(img, (10, y), f"joint(bellows) bend {joint_deg:.1f}deg", (0, 255, 255))
+            jcolor = (0, 140, 255) if curve_ahead else (0, 255, 255)
+            _label(img, (10, y), f"joint(bellows) bend {joint_deg:.1f}deg", jcolor)
             y += 18
         if cond is not None:
             color = _speed_color(cond.get("speed"))
             _label(img, (10, y), f"pipe {cond.get('state')}  ({cond.get('speed')})", color)
             y += 18
-            _label(img, (10, y),
-                  f"circularity {cond.get('circularity', 0):.3f}  roughness {cond.get('roughness', 0):.4f}  "
-                  f"offset {cond.get('offset_mm', 0):.1f}mm", color)
+            if curve_ahead:
+                thr = cond.get("bend_threshold_deg", 0.0)
+                _label(img, (10, y),
+                      f"CURVE AHEAD: joint {abs(joint_deg or 0.0):.1f}deg >= {thr:.1f}deg "
+                      f"-> circularity check skipped", (0, 140, 255))
+            else:
+                _label(img, (10, y),
+                      f"circularity {cond.get('circularity', 0):.3f}  roughness {cond.get('roughness', 0):.4f}  "
+                      f"offset {cond.get('offset_mm', 0):.1f}mm", color)
+
+    # 🚨 2026-08-10 — VERIFY(2차 검증)에서만 weld_done=True 로 온다(사용자
+    #    지시). bead 오버레이는 그대로 두고 그 위에 완료 배너만 얹는다.
+    if judgement.get("weld_done"):
+        h, w = img.shape[:2]
+        bw, bh = 220, 26
+        bx, by = (w - bw) // 2, 8
+        cv2.rectangle(img, (bx, by), (bx + bw, by + bh), (0, 200, 0), -1)
+        cv2.putText(img, "WELD COMPLETE", (bx + 12, by + 19), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 2, cv2.LINE_AA)
 
     return img
 
@@ -191,18 +218,12 @@ class ActiveCamViewerNode(Node):
         if self.frame is not None:
             mode = MODES[self.mode_idx]
             disp = _process(self.frame, mode)
-            label = f"{self.which}  #{self.n_frames}  [{mode}]"
-            color = (0, 255, 0)
         else:
             disp = _placeholder("waiting for active_cam...")
-            label = "waiting for active_cam"
-            color = (0, 255, 255)
 
         if self.judgement is not None and (time.time() - self.judgement_t) <= JUDGE_FRESH_S:
             disp = draw_judgement(disp, self.judgement)
-            label += f"  [judged #{self.n_judgements}]"
 
-        cv2.putText(disp, label, (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2, cv2.LINE_AA)
         cv2.imshow(WINDOW_NAME, disp)
         key = cv2.waitKey(1) & 0xFF
         if key in (27, ord("q")):
