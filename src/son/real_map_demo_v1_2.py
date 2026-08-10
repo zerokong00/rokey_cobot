@@ -134,8 +134,21 @@ SON = Path(__file__).resolve().parent
 #    진입·곡관 통과를 해냈다. 앞 세그먼트 3다리로는 롤을 못 막는다.
 # 🔑 전장 126mm(카메라 포함 137mm) — **188mm 판으로는 못 들어가던 진입
 #    라이저(185mm)에 여유 59mm 로 들어간다.** 배수구 진입이 이때부터 된다.
+# 🎯 **이 파일(v1_2)의 기준 로봇 = `pipe_robot_v9`** (2026-08-09 사용자 지시).
+#    v1_1 은 welder_126 전용이고 그대로 둔다 — 되돌아갈 자리를 남긴다.
+#    welder_126 으로 돌리려면 `ROBOT_USD=robot_v2/welder_126.usda`.
+# 🎯 **기준 로봇 = `pipe_robot_v10`** (2026-08-10, CAD 견적서 수정본 도착).
+#    v9 대비 치수만 바뀌었다 — 관절 방식·링크/조인트 이름은 동일:
+#      전장 244 → 148mm(충돌체 136mm — 라이저 185 에 통째 진입 가능)
+#      굽힘축 간격 ±48 → **±30mm** / 디스크부 74 → 44mm(보스 포함)
+#      다리 한계 −4~+3.7 → **−15~+35mm** (자산이 이제 설계값을 가진다)
+#      추가: WeldPad×3(Body, 용접기 마운트 자리) · LensBoss+CamF/CamR(디스크)
+#            — 전부 **충돌체 없음**(시각 전용), 물리 길이에 안 들어간다
+#    관절은 불변 확인: 롤 자유(드라이브 15/2/2) · 굽힘 ±95°(25/2.5) ·
+#    다리 강성 3000/maxF 60 · 휠 드라이브 0.11 — 전부 v9 와 동일 실측.
+#    v9 로 돌리려면 `ROBOT_USD=robot_v2/pipe_robot_v9.usda`.
 ROBOT_USDA = os.environ.get(
-    "ROBOT_USD", str(SON / "robot_v2" / "welder_126.usda"))
+    "ROBOT_USD", str(SON / "robot_v2" / "pipe_robot_v10.usda"))
 ROBOT_PRIM_IN_USDA = os.environ.get("ROBOT_PRIM", "")
 MAPS = SON / "maps"
 ASSET = Path(ROBOT_USDA).stem
@@ -169,6 +182,84 @@ TUNING = {
     #    ⚠ short 는 **앞 세그먼트가 3다리**라 중심 유지의 최소 구성이다
     #      (3점 지지). 접합부에서 한 다리가 개구에 빠지면 남는 것이 2개뿐이라
     #      앞이 흔들릴 수 있다 — 비교 시험의 핵심 관전점.
+    # 🎯 **조원 v9** (2026-08-09 신설, `v9_test` 단독 검증 통과분).
+    #    구조가 앞 세대와 다르다 — 세그먼트가 **3개**다:
+    #        [DiscR 다리3] ─ RollR+BendR ─ [Body 다리6] ─ RollF+BendF ─ [DiscF 다리3]
+    #    · 굽힘축이 Body 중심에서 ±48mm (중앙 강체 **96mm**, welder 는 25.5mm)
+    #    · 굽힘 한계 **±95°** (welder 는 D6 4개 × ±20° = 총 80°)
+    #    · **롤이 자유회전**(한계 없음) — 굽힘 평면을 몸 자세와 무관하게 겨눈다
+    #    · 용접기 **없음** — 수리 임무는 아직 못 한다(CAD 요청 대상)
+    # 🔑 단독 시험 실측(`v9_test/run_v9_final.py`):
+    #      T 분기  위 +140 / 옆 +164·+154 / 아래 +183mm  (목표 120) ✅ 전 방향
+    #      곡관    **앞 굽힘 −37°(위) + 뒤 자유** → +126mm ✅
+    # 🚨 **힘을 올리면 오히려 나빠진다** — 같은 곡관에서 굽힘 힘 2.5N·m 는
+    #    +123mm 통과, 15N·m 는 +7mm 실패. 목표각을 세게 붙잡을수록 벽과
+    #    싸운다. 그래서 `bel_maxf` 를 자산값(2.5) 그대로 둔다.
+    # 🚨 **앞뒤를 같은 부호로 꺾으면 S 자가 되어 상쇄된다**(굽힘 14.1°→6.9°).
+    #    곡관은 **앞만** 꺾고 뒤는 자유롭게 두는 것이 최고였다.
+    "pipe_robot_v9": dict(
+        wheel_r=0.008, wheel_maxf=0.11,      # 자산값 (스윕 통과 구간 안)
+        # 🚨 **다리 한계는 자산값 그대로** (2026-08-09 파손 규명 — 사용자 분석이
+        #    잡아냄). welder 값(신장 35/수축 15mm)을 복사했더니 바퀴가 관벽 밖
+        #    33mm 까지 뻗어 관을 뚫었고, **디스크 간격이 설계 96mm 에서 228mm
+        #    로 찢어진 채** 돌고 있었다(안착 진단 실측 z +325/+97). 단독 러너가
+        #    멀쩡했던 결정적 차이가 이것 — 거긴 자산 한계 그대로였다.
+        #    v9 는 다리가 짧은 설계다(신장 +3.7 / 수축 −4mm). DN150 대응은
+        #    이 자산으로는 불가 — CAD 요청 사항으로 넘긴다.
+        # 🎯 스트로크 3.7 → **15mm** (2026-08-09 최종 실측 후). 곡관 정지의
+        #    원인이 뜬다리 9/12(도달 43.7 vs 관벽 42, 여유 1.7mm)로 확정됐다.
+        #    "찢어짐"은 오판(디스크 ±114mm 는 설계)이라 스트로크 상향 자체는
+        #    안전하고, 관통(전 35mm 때 33mm 돌출)은 **관경 추적 상한**이 막는다
+        #    (DN100 에서 6~12mm 로 자동 제한 — LEG_BORE_CAP). 수축은 자산 −4mm.
+        piston_stroke=0.015, piston_init=0.001, piston_maxf=9.0,
+        # 🎯 수축 0(자산 −4) → **−15mm** (2026-08-09 정답지 런 진단으로 확정).
+        #    s=471 끼임 순간 다리 여럿이 **−4.0 스토퍼에 박혀** 쐐기였다 —
+        #    v6 검증에 기록된 그 원인이고, welder 는 −15 로 늘려 T 를 통과했다.
+        #    "찢어짐" 오판을 되돌릴 때 수축까지 자산값으로 돌린 것이 화근
+        #    (실제 해악은 신장 관통이었지 수축이 아니다).
+        piston_retract=0.015,
+        center_delta=0.003,
+        bel_stiff=25.0, bel_maxf=2.5,        # 자산값 유지 — 올리면 악화(실측)
+        wheel_center_mm=40.0,
+        seg_rear="DiscR", seg_front="DiscF", seg_mid="Body",
+        cam_front="DiscF", cam_rear="DiscR",
+        # 🔑 조향 방식: 피치/요 배분이 아니라 **롤로 평면을 겨누고 굽힘 한 축**
+        steer_mode="rollbend",
+        roll_joints=("RollF", "RollR"), bend_joints=("BendF", "BendR"),
+        drum="SphF",
+        cam_x=0.010,      # 디스크 바로 앞 — welder 값 35mm 는 허공 부양(실측)
+        steer=None),
+    # 🎯 **v10** (2026-08-10 CAD 수정본 — `CAD_요청_로봇_v10.md` 반영 확인).
+    #    구조·이름은 v9 그대로(DiscR─RollR+BendR─Body─RollF+BendF─DiscF),
+    #    치수만 맵에 맞췄다. 반입 시 자산 실측(usda 파싱):
+    #      전장     148mm(LensBoss 포함) / 충돌체 136mm  ← 라이저 185 여유 49mm
+    #      굽힘축   ±30mm(중앙 강체 60mm — R150 처짐 7.7→3.0mm)
+    #      다리     한계 −15~+35mm **자산 내장** (v9 는 −4~+3.7 을 런타임 덮어씀)
+    #      관절     롤 자유(15/2/2)·굽힘 ±95(25/2.5)·다리 3000/60·휠 0.11
+    #               — v9 와 완전 동일(견적서 "관절 불변" 요청 이행 확인)
+    #      신규     WeldPad×3·LensBoss·CamF/CamR — 충돌체 없음(시각 전용)
+    "pipe_robot_v10": dict(
+        wheel_r=0.008, wheel_maxf=0.11,      # 자산값 (v9 와 동일)
+        # 🔑 스트로크 = 자산 한계 그대로 **35mm** — v9 에서 35 가 위험했던
+        #    관통(33mm 돌출)은 LEG_BORE_CAP(관경 추적 상한, DN100 에서 6~12mm
+        #    자동 제한)이 막는 것을 실측 확인했고, DN150(벽 67mm) 도달에는
+        #    40+35+8=83mm 가 필요하다(견적서 ② 근거). 문제가 보이면 첫 대조는
+        #    PISTON_STROKE=0.015 (v9 채택값 — 이탈 5.8mm 역대 최저 기록).
+        piston_stroke=0.035, piston_init=0.001, piston_maxf=9.0,
+        piston_retract=0.015,                # 자산 한계와 동일(덮어써도 무해)
+        center_delta=0.003,
+        bel_stiff=25.0, bel_maxf=2.5,        # 자산값 유지 — 올리면 악화(v9 실측)
+        wheel_center_mm=40.0,                # 다리 밑동 y=0.04 유지 확인
+        seg_rear="DiscR", seg_front="DiscF", seg_mid="Body",
+        cam_front="DiscF", cam_rear="DiscR",
+        steer_mode="rollbend",
+        roll_joints=("RollF", "RollR"), bend_joints=("BendF", "BendR"),
+        drum="SphF",
+        # 🔑 렌즈 위치 = 자산 LensBoss 앞면(디스크 원점 +11+3 = 14mm).
+        #    디스크 앞면(+8)보다 6mm 돌출 — 견적서 ④ "+10mm 이내" 충족.
+        #    보스는 충돌체가 없어 물리에는 안 걸린다.
+        cam_x=0.014,
+        steer=None),
     "welder_126": dict(
         wheel_r=0.008, wheel_maxf=0.08,
         piston_stroke=0.035, piston_init=0.002, piston_maxf=9.0,
@@ -176,6 +267,9 @@ TUNING = {
         center_delta=0.003,
         bel_stiff=60.0, bel_maxf=15.0,
         wheel_center_mm=40.0,
+        seg_rear="RearBody", seg_front="FrontBody",
+        cam_front="FrontBody", cam_rear="RearBody",
+        steer_mode="pitchyaw",
         steer=("1", "2")),
     "welder_short": dict(
         wheel_r=0.008, wheel_maxf=0.08,
@@ -440,6 +534,70 @@ RELAX_RATE = float(os.environ.get("RELAX_RATE", 20.0))
 #      LOOK 0.05  → 끼임 3회 (s=340~350)
 #      LOOK 0.12  → **코스 끝 도달 · 끼임 0회** · 이탈 4.8/10.8mm  ← 채택
 STEER_LOOK = float(os.environ.get("STEER_LOOK", 0.12))
+# 🎯 v9 굽힘 상한 — 관절 한계는 ±95° 지만 곡관 실측 최적이 **37°** 였고
+#    50° 는 실패했다(+111mm). 상한을 45° 로 둔다.
+STEER_MAX_V9 = float(os.environ.get("STEER_MAX_V9", 45.0))
+# 정답지 조향의 관절당 굽힘 상한(도) — 관절 한계 ±95 안쪽
+BP_BEND_MAX = float(os.environ.get("BP_BEND_MAX", 60.0))
+# 🎯 **굽힘 중 롤 동결 문턱(도)** — 카메라 조향 결함 ⑤(굽힘 중 롤 회전 =
+#    요동)의 정답지판 (2026-08-10). T 원호에서 자유 롤 디스크가 벽 접촉
+#    토크로 돌고 `_aim()` 이 도는 디스크를 뒤쫓아 **적분 폭주**(지령 +392°,
+#    누적 꺾임 593°, 사출 3연발)했다. 평면 회전은 몸이 펴진 순간에만 한다.
+# ⚠ 기본 999 = **꺼짐** (2026-08-10). 8° 로 켜면 floor1 T 폭주는 멎지만
+#    **틀린 평면에 갇힌다**(H런: 진입 곡관의 수직 평면인 채 T 도달, 끼임
+#    37회). floor2 의 곡관1→2 평면 전환(s=510)도 굽힘이 8° 밑으로 안
+#    내려가는 구간이라 켜면 회귀 위험. 실험용 노브로만 남긴다.
+BP_ROLL_LOCK_AT = float(os.environ.get("BP_ROLL_LOCK_AT", 999.0))
+# 🎯 **원호 구간 출구 조준** (2026-08-10 H런 사슬로 확정). 롤 동결만으로는
+#    **틀린 평면에 갇힌다** — 진입 곡관의 굽힘이 8° 밑으로 안 내려간 채 T 에
+#    도달하면 수직 평면에 동결된 채 수평 T 벽만 민다(s=638 끼임 37회 실측).
+#    원호 구간(+직전 PRE)에서는 리딩 목표 접선을 look 지점이 아니라 **원호
+#    출구 접선**으로 준다: 절대 목표라 오차가 자연 수렴(폭주 원리적 소멸),
+#    직선 구간에서 미리 평면을 돌려놓고 원호에서는 유지만 한다.
+BP_ARC_PRE = float(os.environ.get("BP_ARC_PRE", 0.10))
+BP_ARC_KAPPA = float(os.environ.get("BP_ARC_KAPPA", 2.0))  # 1/m, 원호 판정
+# ⚠ 기본 0 = **꺼짐** (2026-08-10 J런 실측). 절대 평면 목표조차 디스크 방향
+#    피드백(_bd)을 참조하는 순간 직선 선조준에서 감긴다(누적 987°, 사출
+#    641mm) — 자유 롤 디스크의 방위 제어는 추종 구조 자체가 문제다.
+#    floor1 T 재도전 시 실험용으로만 켤 것.
+BP_ARC_AIM = os.environ.get("BP_ARC_AIM", "0") == "1"
+# 🎯 **스케줄 조향** (2026-08-10 저녁 — v9 T 통과 레시피의 정답지판).
+#    10 트라이얼(A~J)의 결론: 자유 롤 디스크의 방위는 **추종 제어로 못 잡는다**
+#    — 절대 목표조차 디스크 방향 피드백(_bd)을 참조하는 순간 감긴다(J: 987°).
+#    v9 조원 스크립트(run_v9_final)가 T 를 전 방향 통과한 구조를 그대로 옮긴다:
+#      ① 원호를 중심선에서 **미리** 뽑아 두고(아는 지형 = 스케줄로 못박기)
+#      ② 진입 전 직선(PRE)에서만 롤을 조준 — 지령을 **실측 관절각에 앵커**
+#         (`목표 = 실측 + 오차`). v9 의 `base = _roll_actual()` 이식.
+#         적분기(지령 += 오차)가 아니므로 관절이 벽에 막혀도 지령이 폭주할
+#         수 없다 — A~J 폭주의 공통 원인이 이 적분 구조였다.
+#      ③ 원호 안에서는 롤 **동결** + 고정 굽힘(v9 ROLL_LOCK_AT=3° 의 확장판)
+#      ④ 원호 끝 + LAG 까지 유지 후 해제 (v9 LAG 48mm → 몸이 긴 만큼 100mm)
+#    BP_SCHED=0 이면 기존 추종 조향(steer_bp_rollbend)으로 돈다.
+BP_SCHED = os.environ.get("BP_SCHED", "1") == "1"
+# 원호 안 고정 굽힘 상한(도) — v9 곡관 실측 최적 37°, 50° 는 실패. 원호의
+# 실제 꺾임각이 이보다 작으면 그 각을 쓴다.
+BP_SCHED_BEND = float(os.environ.get("BP_SCHED_BEND", 40.0))
+BP_SCHED_LAG = float(os.environ.get("BP_SCHED_LAG", 0.10))   # 원호 뒤 유지(m)
+BP_SCHED_PRE = float(os.environ.get("BP_SCHED_PRE", 0.10))   # 진입 전 조준(m)
+# 롤 조준의 스텝당 보정 클램프(도) — v9 ROLL_STEP_MAX 이식. 앵커 구조라
+# 폭주는 없지만, 한 스텝의 덜컥임(lurch)을 막는다.
+BP_SCHED_STEP = float(os.environ.get("BP_SCHED_STEP", 20.0))
+BP_REAR_SIGN = float(os.environ.get("BP_REAR_SIGN", 1.0))
+ROLL_SIGN = float(os.environ.get("ROLL_SIGN", 1.0))   # 롤 오차 부호 (실측)
+# 굽힘이 이보다 크면 롤 조준을 멈춘다(도) — 조원 스크립트 값 3.0 이식
+ROLL_LOCK_AT_V9 = float(os.environ.get("ROLL_LOCK_AT_V9", 3.0))
+ROLL_CAL = (float(os.environ["ROLL_CAL"])
+            if os.environ.get("ROLL_CAL") is not None else None)
+# 🎯 **곡관이 아닐 때의 굽힘 상한** (2026-08-09 GUI 실측으로 신설).
+# 🚨 컨트롤러의 조향 지령(최대 40°)은 **welder 기준**이다 — 그쪽은 관절 4개에
+#    나눠 10°씩 쓴다. v9 는 **관절 하나에 40° 를 다 준다**(4배 공격적).
+#    곡관에서는 그게 맞지만(R150 에 37° 필요) 직선에서는 머리가 벽을 파고든다.
+#    실측(GUI): 수직 곡관을 내려온 뒤 수평 구간에서 지령 굽힘이 −40° 로 계속
+#    붙은 채 머리가 박혔다 — 접힌 몸 → 비스듬한 시야 → 큰 입사각 → 최대 조향
+#    → 더 접힘 의 악순환.
+# 🔑 오늘 검출기를 고쳐 **곡관 판정이 정확해졌으므로**(덤프 55장 100%) 그
+#    판정에 상한을 걸 수 있다: 곡관이면 크게, 아니면 작게.
+
 
 # 출발 롤(°) — 다리 클럭 위치를 개구에 대해 돌려 본다. 다리가 120° 간격이라
 # 0~120° 가 전부다. 🚨 실기에서는 로봇이 롤을 제어하지 못한다 — 이 값에
@@ -607,15 +765,48 @@ def _fillet(corners, R=_BEND_R, n=18):
 #    오른쪽 판정: 진행 +X, 상방 +Z → travel×up = (+X)×(+Z) = −Y. 실측 T
 #    (730,850)에서 −Y 731mm·+Y 531mm 가 열려 있고 정면(+X)은 50mm 벽이다.
 _Z1 = -2740.2
+# 🎯 **맵 v2** (2026-08-10 밤 — CAD 수정본 수령·실측 검증 완료).
+#    견적서(CAD_요청_맵_floor1_T_v2.md) 3건 반영 실측: ① T 내부 필렛 R150
+#    양 코너(접선 x=579.8 = 중심선 R150 정확) ② 정면 포켓 130mm(캡 외면
+#    865.0 정확) ③ 진입 직선 150mm — 라이저가 x 330→250 으로 −80mm 이동.
+#    floor1 만 v2 경량본(배관 전용)을 쓴다. floor2 는 무수정이므로 원본 유지.
+#    MAP_V2=0 으로 끄면 종전 원본+데모 내 포켓 연장으로 돈다.
+# v3 (2026-08-10 저녁): 대문자 T + 진짜 스위프 보어 — 3단 검증 통과
+# (실측: 스텁 無·결함대역 h44~48 클리어런스 단조증가·치수 정합 / 육안: 사용자
+#  확인, 갈림날은 설계상 존재 항목). 마개(BP_TEE_PLUG)는 v3 에서 불필요.
+_MAP_V2 = MAPS / "restroom_final0807_floor1T_v3_pipesonly.usd"
+USE_V2 = os.environ.get("MAP_V2", "1") == "1" and _MAP_V2.is_file()
+# 🎯 **straight290 맵** (2026-08-10 저녁 — 사용자 반입). 미터 단위·자체
+#    PhysicsScene·층별 프림(Floor1_Pipes/Floor1_Sump…). 실측 좌표:
+#    라이저 (330,850)·T (750,850)·아래변 y=101·위변 y=1399·우측 x=1340.
+_MAP_S290 = MAPS / "restroom_map_straight290.usda"
+USE_S290 = os.environ.get("MAP_S290", "1") == "1" and _MAP_S290.is_file()
+_F1_RISER_X = 330.0 if USE_S290 else (250.0 if USE_V2 else 330.0)
+_TX = 750.0 if USE_S290 else 730.0
+_LO = 101.0 if USE_S290 else 100.0
+_HI = 1399.0 if USE_S290 else 1400.0
+_RC = 1340.0 if USE_S290 else 1300.0
 _F1_CORNERS = [
-    (330.0, 850.0, -2405.2),       # 거름망 아래 (라이저 상단)
-    (330.0, 850.0, _Z1),           # 라이저 → 수평망
-    (730.0, 850.0, _Z1),           # ★T 분기★
-    (730.0, 100.0, _Z1),           # 오른팔(−Y)로 나감
-    (1300.0, 100.0, _Z1),          # 루프 아래변 → +X
-    (1300.0, 1400.0, _Z1),         # 우변 +Y (합류부 1300,750 통과)
-    (730.0, 1400.0, _Z1),          # 위변 −X
-    (730.0, 850.0, _Z1),           # ★T 로 복귀★ (한 바퀴 닫힘)
+    (_F1_RISER_X, 850.0, -2495.0 if USE_S290 else -2405.2),  # 라이저 상단
+    (_F1_RISER_X, 850.0, _Z1),     # 라이저 → 수평망
+    (_TX, 850.0, _Z1),             # ★T 분기★
+    (_TX, _LO, _Z1),               # 오른팔(−Y)로 나감
+    (_RC, _LO, _Z1),               # 루프 아래변 → +X
+    (_RC, _HI, _Z1),               # 우변 +Y (합류부 통과)
+    (_TX, _HI, _Z1),               # 위변 −X
+    (_TX, 850.0, _Z1),             # ★T 로 복귀★ (한 바퀴 닫힘)
+    # 🎯 **역재생 귀가** (2026-08-10 밤 — t52~74 실측 결론: 왼팔→본관 전진
+    #    턴은 T 의 X/Y 비대칭(본관 관통=포켓 캡 막힘 vs 팔 관통=뚫림) 탓에
+    #    "성공 기동의 역순"이 아니다 — 세워줄 벽이 없어 20여 런 전부 정체.
+    #    진짜 역순은 **오른팔에서 후진으로 본관 진입**: 성공한 나가는 턴의
+    #    시간 역재생이라 포켓 캡이 다시 받침벽이 되고 검증 안 된 물리가
+    #    없다. → 코스는 크로스바 직진으로 오른팔에 250mm 들어가 끝나고,
+    #    복귀는 BACK(후진)이 나가는 가지 s 로 스냅해 원길을 되밟는다.
+    # 🎯 되감기 최종 설계 (t89 해부 — 크로스바 횡단은 양 옆벽(본관 입구+
+    #    포켓 입구)이 동시에 빈 구간이라 좌초. 대신 **루프를 코스 후진으로
+    #    되밟아** 오른팔에서 접합부로 후진 접근(전 구간 벽 있음, floor2
+    #    검증 부류) → s∈[400,1000] 에서 테이프 되감기 → 포켓 벽 받침으로
+    #    T 역통과 → 본관 → 라이저 → 탈출. 벽 없는 기동 전무.)
 ]
 _Z2 = -250.0
 _F2_CORNERS = [
@@ -632,9 +823,12 @@ _F2_CORNERS = [
 # 🚨 건물이 z −2980~+2100mm 라 z=0 이 한가운데를 자른다. 수평망을 원점에
 #    맞춰야 좌표가 ±2m 안에 들어오고 지면과도 안 겹친다(real_map_demo 규약).
 COURSES = {
-    "floor1": (_MAP, scale(MM) * trans(0.0, 0.0, -_Z1 * MM),
+    "floor1": (_MAP_S290 if USE_S290 else (_MAP_V2 if USE_V2 else _MAP),
+               scale(MM) * trans(0.0, 0.0, -_Z1 * MM),
                _fillet(_F1_CORNERS),
-               "화장실 floor1 — **닫힌 루프**. T 에서 오른팔로 나가 한 바퀴"),
+               "화장실 floor1 — **닫힌 루프**. T 에서 오른팔로 나가 한 바퀴"
+               + (" [맵 straight290: 미터 단위]" if USE_S290 else
+                  " [맵 v3: 대문자 T·스위프 보어]" if USE_V2 else "")),
     "floor2": (_MAP, scale(MM) * trans(0.0, 0.0, -_Z2 * MM),
                _fillet(_F2_CORNERS),
                "화장실 floor2 — 막다른 끝(단절)까지 2.5m"),
@@ -731,7 +925,15 @@ for name in RUN_NAMES:
     root_path = f"/World/Pipe_{name}"
     root = stage.DefinePrim(root_path, "Xform")
     root.GetReferences().AddReference(str(usd))
-    UsdGeom.Xformable(root).AddTransformOp().Set(xform)
+    # 🚨 straight290 은 **미터 단위**(기존 맵은 mm) — 배율 없이 z 만 맞춘다.
+    #    중심선(cl_mm)은 아래에서 기존 xform(mm 배율)으로 변환하므로 그대로.
+    _map_xf = (trans(0.0, 0.0, -_Z1 * MM)
+               if USE_S290 and name == "floor1" else xform)
+    UsdGeom.Xformable(root).AddTransformOp().Set(_map_xf)
+    # 🚨 맵 내장 PhysicsScene 은 끈다 — 물리 씬 중복은 기록된 발산 사고.
+    for _ps in [c for c in Usd.PrimRange(root)
+                if c.IsA(UsdPhysics.Scene)]:
+        _ps.SetActive(False)
     # 🚨 인스턴스 프로토타입이면 콜라이더 부여가 안 먹는다 — 먼저 푼다.
     while True:      # 풀면 자식이 새로 드러나므로 더 나올 게 없을 때까지 돈다
         inst = [p for p in stage.Traverse()
@@ -748,7 +950,22 @@ for name in RUN_NAMES:
         #    샤프트가 다 들어 있어 전부 주면 삼각형이 5만을 넘고, 무엇보다
         #    다른 층 관을 잘못 잡을 위험이 있다(real_map_demo 규약).
         #    렌더는 남긴다 — GUI 에서 건물 맥락이 보이는 편이 낫다.
-        if f"/{name}/" not in str(p.GetPath()):
+        if USE_S290 and name == "floor1":
+            # straight290: 층별 프림 이름으로 콜라이더 선별 (배관+섬프만)
+            _sp290 = str(p.GetPath())
+            if not ("/Floor1_Pipes/" in _sp290 or "/Floor1_Sump/" in _sp290):
+                n_skip += 1
+                continue
+        elif USE_V2 and name == "floor1":
+            # 🎯 맵 v2 경량본은 층 이름 프림이 없다(해석 B-rep 파트 3개:
+            #    floor1/floor2/aisle). **z 로 가른다** — floor1 배관망은
+            #    z −2820~−2490(mm), floor2 는 −305~0, 통로 샤프트는 −2900~−245
+            #    에 걸치므로 "z 최대 < −2000" 이 floor1 만 정확히 고른다.
+            _mpts = UsdGeom.Mesh(p).GetPointsAttr().Get()
+            if not _mpts or max(float(q[2]) for q in _mpts) > -2000.0:
+                n_skip += 1
+                continue
+        elif f"/{name}/" not in str(p.GetPath()):
             n_skip += 1
             continue
         # 🚨 `Sweep` 은 관 **속살(내면)만** 따로 들어 있는 면체(surface body)라
@@ -791,6 +1008,120 @@ for name in RUN_NAMES:
           f"({cl.p[-1][0] * 1000:+.0f}, {cl.p[-1][1] * 1000:+.0f}, "
           f"{cl.p[-1][2] * 1000:+.0f})mm")
     print(f"           {desc}")
+# ── 🎯 floor1 T 포켓 연장 (2026-08-10 밤 — T 기하 부족 해소, 사용자 승인) ──
+# 🔴 각진 T 는 정면 포켓이 50mm 뿐인데 v10 머리의 90° 선회 스윕이 ~55mm 라
+#    물리적으로 못 돈다(t6~t14: 힘 2.3배·속도 2배·만개 전부 s=638 동일 좌표
+#    정적 쐐기). 스위프 T 자산은 포트 길이가 2~4배 달라 그대로 끼우면 이웃
+#    관과 겹침(겹침=발산 전례) → **T 조각(Trim1, 별도 프림)의 막힌 끝벽
+#    페이스만 제거하고 +X 연장관(캡 포함)을 덧붙인다.** 맵 파일 무수정
+#    (세션 메모리에서만) · BP_TEE_POCKET=0 으로 끔 · 이음새는 동축 원단면
+#    1곳(내경 50.0 실측 정합).
+# 🎯 **T 포켓 마개** (2026-08-10 밤 — 사용자 육안 발견: v2 의 T 가 혹 달린
+#    소문자 t 다. 혹=포켓 130 은 내 견적 ② 오류 — t23 실측대로 코너 바깥벽
+#    자리를 구멍으로 만들어 머리를 포획한다). x=780(팔 외벽과 동일면)에
+#    마개 벽을 세워 **대문자 T + 필렛**(유일하게 미시험인 정답 후보 조합)을
+#    재현한다. 맵 파일 무수정 — 통과 확인 시 CAD 에 포켓 제거 정식 요청.
+BP_TEE_PLUG = os.environ.get("BP_TEE_PLUG", "0") == "1"   # v3: 진짜 벽 있음
+if BP_TEE_PLUG and "floor1" in paths:
+    _f1m = next((p for p in stage.Traverse()
+                 if p.IsA(UsdGeom.Mesh)
+                 and str(p.GetPath()).startswith("/World/Pipe_floor1")
+                 and (lambda _pt: _pt and max(float(q[2]) for q in _pt)
+                      < -2000.0)(UsdGeom.Mesh(p).GetPointsAttr().Get())),
+                None)
+    if _f1m is None:
+        print("[경고] T 마개: floor1 메시를 못 찾았다 — 마개 생략")
+    else:
+        _zc9, _yc9, _xw9 = -2740.228, 850.0, 779.0
+        _n9 = 32
+        _pts9 = [Gf.Vec3f(_xw9, _yc9 + 50.0 * math.cos(2 * math.pi * j / _n9),
+                          _zc9 + 50.0 * math.sin(2 * math.pi * j / _n9))
+                 for j in range(_n9)] + [Gf.Vec3f(_xw9, _yc9, _zc9)]
+        _idx9 = []
+        for j in range(_n9):
+            _idx9.append([j, (j + 1) % _n9, _n9])
+        _pm9 = UsdGeom.Mesh.Define(
+            stage, str(_f1m.GetParent().GetPath()) + "_tee_plug")
+        _pm9.CreatePointsAttr(_pts9)
+        _pm9.CreateFaceVertexCountsAttr([3] * len(_idx9))
+        _pm9.CreateFaceVertexIndicesAttr([i for f in _idx9 for i in f])
+        _pm9.CreateSubdivisionSchemeAttr("none")
+        _pm9.CreateDoubleSidedAttr(True)
+        _pm9.CreateDisplayColorAttr([Gf.Vec3f(0.55, 0.58, 0.60)])
+        _pp9 = _pm9.GetPrim()
+        UsdPhysics.CollisionAPI.Apply(_pp9)
+        UsdPhysics.MeshCollisionAPI.Apply(_pp9).CreateApproximationAttr("none")
+        UsdShade.MaterialBindingAPI.Apply(_pp9).Bind(
+            UsdShade.Material.Get(stage, "/World/PipePhysMat"),
+            bindingStrength=UsdShade.Tokens.weakerThanDescendants,
+            materialPurpose="physics")
+        print(f"[준비] 🔧 T 마개 — x={_xw9:.0f}mm(팔 외벽면)에 원판 벽 "
+              f"(대문자 T + 필렛 재현, 맵 파일 무수정)")
+
+# 맵 v2 는 포켓 130mm 가 실제 형상에 있다 — 데모 내 수술은 원본 맵 전용.
+BP_TEE_POCKET = float(os.environ.get("BP_TEE_POCKET",
+                                     0.0 if USE_V2 else 0.08))
+if "floor1" in paths and BP_TEE_POCKET > 0:
+    _tp = next((p for p in stage.Traverse()
+                if p.IsA(UsdGeom.Mesh)
+                and str(p.GetPath()).startswith("/World/Pipe_floor1")
+                and "Trim1" in str(p.GetPath())
+                and "Sweep" not in str(p.GetPath())), None)
+    if _tp is None:
+        print("[경고] T 포켓 연장: Trim1 메시를 못 찾았다 — 연장 생략")
+    else:
+        _tm = UsdGeom.Mesh(_tp)
+        _tpts = np.array(_tm.GetPointsAttr().Get(), dtype=np.float64)
+        _tcnt = list(_tm.GetFaceVertexCountsAttr().Get())
+        _tidx = list(_tm.GetFaceVertexIndicesAttr().Get())
+        # 끝벽 = x>779.5(실측 780) 버텍스만으로 이루어진 페이스
+        _wall = _tpts[:, 0] > 779.5
+        _nc, _ni, _k, _cut = [], [], 0, 0
+        for _c in _tcnt:
+            _f = _tidx[_k:_k + _c]
+            if all(_wall[_v] for _v in _f):
+                _cut += 1
+            else:
+                _nc.append(_c)
+                _ni.extend(_f)
+            _k += _c
+        _tm.GetFaceVertexCountsAttr().Set(_nc)
+        _tm.GetFaceVertexIndicesAttr().Set(_ni)
+        # 연장관 — Trim1 과 같은 부모(맵 로컬 mm 프레임)에 만든다
+        _ext_len = BP_TEE_POCKET * 1000.0            # mm
+        _zc, _yc, _x0 = -2740.2, 850.0, 780.0
+        _n = 32
+        _pts2, _idx2 = [], []
+        for _i, _x in ((0, _x0 - 2.0), (1, _x0 + _ext_len)):
+            for _j in range(_n):
+                _a = 2.0 * math.pi * _j / _n
+                _pts2.append(Gf.Vec3f(_x, _yc + 50.0 * math.cos(_a),
+                                      _zc + 50.0 * math.sin(_a)))
+        _pts2.append(Gf.Vec3f(_x0 + _ext_len, _yc, _zc))   # 캡 중심
+        for _j in range(_n):
+            _j2 = (_j + 1) % _n
+            _idx2 += [[_j, _j2, _n + _j2], [_j, _n + _j2, _n + _j]]
+        for _j in range(_n):                                # 끝 캡
+            _idx2.append([_n + _j, _n + (_j + 1) % _n, 2 * _n])
+        _em = UsdGeom.Mesh.Define(
+            stage, str(_tp.GetParent().GetPath()) + "_pocket_ext")
+        _em.CreatePointsAttr(_pts2)
+        _em.CreateFaceVertexCountsAttr([3] * len(_idx2))
+        _em.CreateFaceVertexIndicesAttr([i for f in _idx2 for i in f])
+        _em.CreateSubdivisionSchemeAttr("none")
+        _em.CreateDoubleSidedAttr(True)
+        _em.CreateDisplayColorAttr([Gf.Vec3f(0.55, 0.58, 0.60)])
+        _ep = _em.GetPrim()
+        UsdPhysics.CollisionAPI.Apply(_ep)
+        UsdPhysics.MeshCollisionAPI.Apply(_ep).CreateApproximationAttr("none")
+        UsdShade.MaterialBindingAPI.Apply(_ep).Bind(
+            UsdShade.Material.Get(stage, "/World/PipePhysMat"),
+            bindingStrength=UsdShade.Tokens.weakerThanDescendants,
+            materialPurpose="physics")
+        print(f"[준비] 🔧 T 포켓 연장 — Trim1 끝벽 페이스 {_cut}개 제거, "
+              f"x={_x0:.0f}→{_x0 + _ext_len:.0f}mm 연장관(캡) 추가 "
+              f"(스윙 공간 50→{50 + _ext_len:.0f}mm, 맵 파일 무수정)")
+
 tick("배관 적재 완료")
 print(f"[항법] {NAV} — "
       + ("조향이 **중심선(도면)** 을 따라간다. 자율 근거로 쓰지 말 것"
@@ -819,10 +1150,21 @@ F_PX = (CAM_W / 2.0) / math.radians(CAM_HFOV / 2.0)
 #    실측: FrontBody 원점 x=+62mm, 로봇 앞끝 x=+94mm, 뒤끝 −94mm.
 # 🚨 카메라를 본체 안에 박아 두면 안 된다(기록된 사고 — 관벽 화소 0). 앞끝
 #    보다 앞으로 내고, 하우징은 센서 뒤 5mm 에 둔다.
+# 🚨 부모 링크 이름이 자산마다 다르다 — welder 는 Front/RearBody, v9 는
+#    DiscF/DiscR. 상수로 박으면 자산을 바꾸는 순간 **카메라가 0대로 조용히
+#    건너뛰어진다**(벨로우즈에서 실제로 그랬던 기록).
+# 🚨 **카메라 오프셋도 자산별이다** (2026-08-09 사용자 관찰 → 프로브 실측).
+#    +35mm 는 welder 기준(몸통 원점 +62, 코끝 +94 → 카메라가 코보다 3mm 앞).
+#    v9 는 앞 디스크가 로봇 맨 앞이라 +35mm 를 물려받으면 카메라·하우징이
+#    **로봇 앞 허공에 떠서** 따라다닌다(프로브: 간격 35.0mm 고정 = 부착은
+#    정상, 위치가 틀린 것). 곡관에서는 그 떠 있는 카메라가 벽에 제일 먼저
+#    박혀 **관경 4mm 장님**의 한 원인이 된다.
 CAM_SPECS = [
     # 이름, 부모 링크, 링크 로컬 x, 전방 여부
-    ("front_camera", "FrontBody", +0.035, True),
-    ("back_camera", "RearBody", -0.035, False),
+    ("front_camera", TUNE.get("cam_front", "FrontBody"),
+     TUNE.get("cam_x", 0.035), True),
+    ("back_camera", TUNE.get("cam_rear", "RearBody"),
+     -TUNE.get("cam_x", 0.035), False),
 ]
 
 # 출발점 — 입구에서 안쪽으로 120mm. 🚨 안착 중에 로봇이 뒤로 밀린다(피스톤
@@ -868,6 +1210,58 @@ END_S = float(os.environ.get("END_S", 0.10))
 #    (s 는 채점 정보다 — 주행 판단이 아니라 **언제 끝났는지**를 정하는 데만
 #     쓴다. 코스 끝 판정(`recall`)이 이미 같은 규약이다.)
 EXIT_S = float(os.environ.get("EXIT_S", 0.02))
+# 🎯 **완전 탈출** (2026-08-10 사용자 지시: *"완전히 튀어나와서 몸 전체가
+#    배수구 관 밖으로 나올 수 있게"*). 중심선 s 는 0 에 클램프되어 관 밖을
+#    못 세므로, s<EXIT_S 도달 후에는 **월드 변위**로 이만큼 더 후진한다.
+# 🚨 **관구(중심선 끝) 위에 거름망 하우징이 더 있다** (2026-08-10 사용자
+#    제보 → 맵 버텍스 실측으로 확정. 배관과 거름망은 **서로 다른 규격**이
+#    맞물린 구조라 치수를 단정하지 말 것 — 실측이 기준):
+#      z 0(관 끝, r50~55) → z+85 까지 벽 r50~55 지속(짚을 수 있음)
+#      z+85 환형 시트 r50→92 → z+100 샤워 바닥면 림 r92
+#    완주 거리: 래치(s=20) + 보어 85 + 시트 15 + 디스크 끝 14 + 여유 ≈ 150mm.
+EXIT_EXTRA = float(os.environ.get("EXIT_EXTRA", 0.15))
+# 🚨 관구 위 공동은 **짚을 벽이 없다** (실측 정정 2단계: 하우징 내벽 r92 >
+#    다리 도달 83mm. z=0 의 r50~55 는 벽이 아니라 바닥판 구멍 테두리였다 —
+#    "보어가 이어진다"던 1차 해석은 다리 신장 35 허공 실측으로 반증).
+#    → **문턱 두 개를 분리한다** (2026-08-10 스윕 실측):
+#      감속+증강 = 일찍(−20mm) / 접기 = 늦게(−3mm).
+#      +10 에서 접으면 다리가 +8 에서 사각 벽(65mm)을 먼저 물고(2mm 차),
+#      −20 에서 접으면 접는 순간 접지를 잃어 접기선에서 왕복(s=144↔164).
+#      −3 은 s-기준 시절 최고(s=62 도달)와 같은 선 — 그때 없던 저속·증강이
+#      이번엔 이미 걸려 있다. 거름망 구멍 r50, 접힌 휠 r33 만 통과.
+EXIT_BORE_H = float(os.environ.get("EXIT_BORE_H", -0.003))
+EXIT_SLOW_H = float(os.environ.get("EXIT_SLOW_H", -0.02))
+# 🎯 **림 맨틀링** (2026-08-10): 거름망 판 윗면(h≈100)을 넘은 다리는 다시
+#    편다 — 바퀴가 림 모서리를 잡고 돌아 몸을 끌어올린다(맨홀 탈출 동작).
+#    전부 접힌 채 +33mm 에서 "밀 곳 없음" 정지 실측 → 관 밖 추진력은
+#    림을 잡은 바퀴에서 나온다.
+#    🚨 펴는 선 = **하우징 전체(사각 130 + 판 구멍)를 완전히 벗어난 뒤**
+#    (2026-08-10 사용자 확정: *"DN100 보다 넓은 그곳을 탈출했을 때 펴라"*).
+#    바닥면(h100)에서 펴면 편 다리가 판·림을 또 문다(GUI 2회 실측) —
+#    바닥 +20mm 여유. 하우징 실측: 사각 한 변 ~130(대각 r92)·높이 85 +
+#    판 15(구멍 Ø100) = 바닥면 h100.
+EXIT_RIM_H = float(os.environ.get("EXIT_RIM_H", 0.120))
+# 🚨 끼임 탈출은 임무 방향 **반대로 이만큼만** 물러나는 동작이다 — 물러난 뒤
+#    임무 방향으로 복원한다. 복원이 없으면 복귀 중 끼임 한 번에 코스 끝
+#    판정까지 **한 바퀴를 더 돈다**(2026-08-10 GUI 런 실측: 복귀 라이저
+#    끼임 s≈200 → 전진 그대로 → 2바퀴째 s=727 에서 사용자가 창을 닫음).
+UNJAM_M = float(os.environ.get("UNJAM_M", 0.05))
+# 🎯 탈출 중 **아직 관 안인 다리의 예압 증강**(N). 관구 밖 세그먼트를 접고
+#    나면 남은 다리 3개 마찰(0.4×9N×3=10.8N)이 자중 13.3N 을 못 이겨 수직
+#    라이저에서 미끄러진다(실측: s=62 끼임 7회 반복). 30N 이면 36N > 13.3N.
+#    ⚠ 30N 은 과했다 — 라이저에서 굽힘 자기쐐기(아래 EXIT_STRAIGHT_S)를
+#    벽에 더 세게 박아 s=123 끼임 16회. 15N 도 마찰 54N > 자중 13.3N.
+EXIT_PUSH_N = float(os.environ.get("EXIT_PUSH_N", 15.0))
+# 🎯 복귀 관구 접근(s < 이 값)은 **라이저 직선** — 굽힘을 무조건 편다.
+#    굽힘각을 접선↔몸축으로 재는 자기참조 탓에, 곡관에서 얻은 굽힘(F−48°)이
+#    직선에서도 자기 자신을 지탱하며 관을 가로질러 버티는 **자기쐐기**가
+#    실측됐다(2026-08-10 회귀 런: s=123 끼임 16회, 이탈 1~10mm 정중앙).
+EXIT_STRAIGHT_S = float(os.environ.get("EXIT_STRAIGHT_S", 0.16))
+# 🎯 탈출 마지막 구간 속도 상한(m/s). 마지막 3다리 구간의 정지 원인은
+#    접지 부족이 아니라 **휠 감쇠가 토크 예산을 먹는 것** (2026-08-10 실측:
+#    45mm/s → 감쇠 0.067/0.11N·m, 78mm/s → 0.117 = 예산 초과·견인 0).
+#    20mm/s 면 휠당 견인 10N × 3륜 = 30N > 자중 13.3N.
+EXIT_V = float(os.environ.get("EXIT_V", 0.02))
 
 robots = []
 
@@ -937,6 +1331,17 @@ def seg_body_prims(root, jd):
     `FrontBody`) 'front' 또는 '1' 이 든 쪽을 앞으로 본다.
     """
     prims = [stage.GetPrimAtPath(p) for p in jd["seg_bodies"]]
+    # 🎯 **자산이 이름을 알려 주면 그것을 쓴다** (2026-08-09). 이름 휴리스틱
+    #    ('front' 가 들었나 / '1' 이 들었나)은 세그먼트가 2개일 때만 통한다 —
+    #    v9 는 **3개**(DiscR / Body / DiscF)라 셋 다 키가 0 이 되어 순서가
+    #    사전 순에 좌우된다(= 앞뒤가 뒤집힐 수 있다).
+    _fr, _rr = TUNE.get("seg_front"), TUNE.get("seg_rear")
+    if _fr and _rr:
+        _by = {p.GetName(): p for p in prims}
+        if _fr in _by and _rr in _by:
+            return _by[_rr], _by[_fr]
+        raise SystemExit(f"[중단] 세그먼트 이름 {_rr}/{_fr} 을 못 찾았다 — "
+                         f"자산에 있는 것: {sorted(_by)}")
     prims.sort(key=lambda p: (2 if "front" in p.GetName().lower() else 0)
                + (1 if "1" in p.GetName() else 0))
     return prims[0], prims[-1]
@@ -1211,6 +1616,40 @@ print(f"[준비] 휠 토크 한계 {WHEEL_MAXFORCE:.4f} N·m × {_n_wf}개 "
       f"(여유 "
       f"{12 * WHEEL_MAXFORCE / WHEEL_R / (FRICTION_STATIC * len(robots[0]['jd']['legs']) * PISTON_MAXF):.1f}배)")
 
+# ── 롤 드라이브 토크 한계 덮어쓰기 (2026-08-10 스케줄 조향) ─────────
+# 🚨 v10 자산의 롤 드라이브 maxForce 는 2 N·m 인데 조향 저항 실측이 ~2.5 N·m
+#    (다리를 벽에 끌며 도는 마찰 — v9 조원 스크립트 주석과 같은 수치)다.
+#    직선(저마찰)에서는 조준이 되지만 **T 벽 접촉 토크는 못 버텨** 진입 순간
+#    드럼이 되돌아갔다(t4 실측: dot +1.00 → 1초 뒤 -0.94). v9 조원도 같은
+#    이유로 ROLL_MF 2→5 로 올렸다. world.reset() 앞, 런타임 지령은 위치만.
+BP_ROLL_MF = float(os.environ.get("BP_ROLL_MF", 5.0))
+# 🎯 굽힘 토크도 덮어쓴다 (2026-08-10 밤 — 사용자: *"v11 속성값은 절대적인
+#    게 아니다, 힘이 필요하면 뚫어라"*). 자산 저작값 2.5 N·m 는 허공에서는
+#    지령을 따라가지만 **벽에 눌린 몸을 꺾어 돌리는 부하에서는 부족**하다 —
+#    welder 실측: 상한 15 로 올리고서야 관절이 벽을 이겼다(강성 스윕 기록).
+BP_BEND_MF = float(os.environ.get("BP_BEND_MF", 0.0))   # 0 = 자산값
+_n_rf = _n_bf = 0
+if TUNE.get("steer_mode") == "rollbend":
+    _rn3 = set(TUNE.get("roll_joints", ()))
+    _bn3 = set(TUNE.get("bend_joints", ()))
+    for _r in robots:
+        for _p in Usd.PrimRange(stage.GetPrimAtPath(_r["path"])):
+            _d = None
+            if BP_ROLL_MF > 0 and _p.GetName() in _rn3:
+                _d = UsdPhysics.DriveAPI.Get(_p, "angular")
+                if _d:
+                    _d.CreateMaxForceAttr(BP_ROLL_MF)
+                    _n_rf += 1
+            elif BP_BEND_MF > 0 and _p.GetName() in _bn3:
+                _d = UsdPhysics.DriveAPI.Get(_p, "angular")
+                if _d:
+                    _d.CreateMaxForceAttr(BP_BEND_MF)
+                    _n_bf += 1
+    if _n_rf or _n_bf:
+        print(f"[준비] 조향 토크 덮어씀 — 롤 {BP_ROLL_MF:.1f} N·m × {_n_rf}개"
+              + (f", 굽힘 {BP_BEND_MF:.1f} N·m × {_n_bf}개" if _n_bf else
+                 " (굽힘은 자산값)"))
+
 # ── 감지 밴드 (contactOffset) ───────────────────────────────────────
 # 🚨 **반드시 여기서 돌린다** — 배관·로봇·토치가 전부 스테이지에 올라온 뒤이고
 #    world.reset() 의 cook 보다는 앞이다. 배관 직후에 돌리면 로봇 usda 가 아직
@@ -1277,6 +1716,28 @@ for r in robots:
         sg = jd["leg_seg"].get(_base(n, _ln), 0)
         _seen[sg] = _seen.get(sg, 0) + 1
         r["piston"][(sg, _seen[sg] - 1)] = k
+    # 🎯 세그먼트 번호 → 바디 프림 — 완전 탈출 때 "이 세그먼트가 관구 밖인가"
+    #    를 위치로 판단해 다리를 접는 데 쓴다(2026-08-10).
+    r["seg_prim_of"] = {}
+    for _j in jd["legs"]:
+        _sg2 = jd["leg_seg"].get(_j.GetName())
+        if _sg2 is not None and _sg2 not in r["seg_prim_of"]:
+            _tg = _j.GetRelationship("physics:body0").GetTargets()
+            if _tg:
+                r["seg_prim_of"][_sg2] = stage.GetPrimAtPath(_tg[0])
+    # 🎯 다리 DOF → 암 프림 — 탈출 접기를 **다리 단위**로 (2026-08-10 밤).
+    #    세그먼트째 접으면 몸통 두 줄(±24mm) 중 아직 벽이 있는 아랫줄까지
+    #    한꺼번에 잃어 앞 3다리만 남는 구간이 일찍 온다(s=62 정지 실측).
+    r["leg_arm_of"] = {}
+    for _j in jd["legs"]:
+        _tg = _j.GetRelationship("physics:body1").GetTargets()
+        if not _tg:
+            continue
+        _pr2 = stage.GetPrimAtPath(_tg[0])
+        _nm2 = _j.GetName()
+        for k2, n2 in enumerate(dof):
+            if _base(n2, _ln) == _nm2 and "TRANSLATION" in types[k2]:
+                r["leg_arm_of"][k2] = _pr2
     r["bel"] = [k for k, n in enumerate(dof) if _base(n, _bn) in _bn]
     # 🚨 **개수를 상수로 박지 말 것.** 다리는 자산마다 다르다(벨로우즈 6 /
     #    용접기 v2·126 은 12 / **welder_short 는 9**)고 고쳤으면서 휠은 12 로
@@ -1324,6 +1785,32 @@ for r in robots:
               f"차동 속도를 끈다")
 
     # 조향용 — 중앙 관절의 피치/요 DOF 를 갈라 둔다 (D6 는 `J0:1`·`J0:2`)
+    # ── 조향 축 매핑 — 자산 방식에 따라 갈린다 ─────────────────────
+    # 🎯 **rollbend** (v9): 롤 관절이 굽힘 평면을 겨누고, 굽힘 관절 한 축이
+    #    꺾는다. 피치/요 배분이 필요 없다 — 방향과 크기가 분리된다.
+    #    welder 의 pitchyaw 는 D6 두 축에 sin/cos 로 나눠 주는 방식이라
+    #    비틀림이 잠긴 몸에서 배분식이 요동친다(오늘 브레이크 댄스의 한 원인).
+    r["roll_dof"], r["bend_dof"] = [], []
+    if TUNE.get("steer_mode") == "rollbend" and STEER_ON:
+        _rn = set(TUNE.get("roll_joints", ()))
+        _bn = set(TUNE.get("bend_joints", ()))
+        r["roll_dof"] = [k for k, n in enumerate(dof) if _base(n, _rn) in _rn]
+        r["bend_dof"] = [k for k, n in enumerate(dof) if _base(n, _bn) in _bn]
+        # 앞/뒤를 가른다 — **곡관은 앞만 꺾고 뒤는 자유롭게 두는 것이 최고**
+        # 였다(단독 실측: 앞만 +126mm / 앞뒤 C자 +123 / 같은 부호 S자 +16).
+        _fj = TUNE["bend_joints"][0]
+        r["bend_front"] = [k for k, n in enumerate(dof)
+                           if _base(n, _bn) == _fj]
+        r["roll_front"] = [k for k, n in enumerate(dof)
+                           if _base(n, _rn) == TUNE["roll_joints"][0]]
+        if not (r["bend_front"] and r["roll_front"]):
+            raise SystemExit(
+                f"[중단] {r['name']} 롤·굽힘 DOF 매핑 실패 — "
+                f"롤 {len(r['roll_dof'])} 굽힘 {len(r['bend_dof'])}. "
+                f"중앙 DOF: {[dof[k] for k in r['bel']]}")
+        print(f"  {r['name']}: 조향 **롤+굽힘** — 롤 {len(r['roll_dof'])} "
+              f"(앞 {len(r['roll_front'])}) / 굽힘 {len(r['bend_dof'])} "
+              f"(앞 {len(r['bend_front'])})")
     _ax = TUNE.get("steer")
     if _ax and STEER_ON:
         r["bel_pitch"] = [k for k, n in enumerate(dof)
@@ -1343,6 +1830,22 @@ for r in robots:
              if r["bel_pitch"] else " (조향 없음)") + " 매핑 완료")
     _rear, _front = seg_body_prims(stage.GetPrimAtPath(r["path"]), jd)
     r["seg0"], r["seg1"] = _rear, _front
+    # 🎯 **드럼** — 앞 롤 관절이 돌리는 링크(v9 의 SphF). 굽힘 평면의 절대
+    #    방위를 여기서 읽는다(조원 스크립트와 같은 근거). 없으면 롤 제어를
+    #    끄고 조용히 넘어가지 않는다 — 경고를 찍는다.
+    r["drum_prim"] = None
+    r["drum_rear_prim"] = None
+    r["mid_prim"] = None
+    if TUNE.get("steer_mode") == "rollbend":
+        _root_p = stage.GetPrimAtPath(r["path"])
+        for _nm2, _key in ((TUNE.get("drum", "SphF"), "drum_prim"),
+                           (TUNE.get("drum_rear", "SphR"), "drum_rear_prim"),
+                           (TUNE.get("seg_mid", "Body"), "mid_prim")):
+            _dp = next((c for c in Usd.PrimRange(_root_p)
+                        if c.GetName() == _nm2), None)
+            if _dp is None:
+                print(f"[경고] {r['name']}: 링크 {_nm2} 를 못 찾았다")
+            r[_key] = _dp
     # 끼임 진단용 — 휠 링크 프림을 조인트에서 거꾸로 찾는다(이름 규약 무관)
     r["wheel_prims"] = []
     for _j in jd["wheels"]:
@@ -1523,22 +2026,232 @@ def _set_eff(r, values, indices):
         return False
 
 
+# ── 🎯 **다리 신장 상한을 추적 관경에 묶는다** (2026-08-09 신설) ────────
+# 🚨 상한 35mm 는 **DN150 용**이다(관벽 67mm − 다리 밑동 40mm = 27mm 필요).
+#    DN100 에서는 관벽이 42mm 라 **2mm** 면 충분한데, 상한이 열려 있으니
+#    곡관에서 다리가 벽을 잠깐 놓치면 **한계까지 래칫으로 뻗어** 얇은 관 메시를
+#    뚫고 나간다(GUI 실측: 다리 하나가 곡관 바깥으로 튀어나옴, 도달 71mm).
+# 🔑 관경은 이미 추적하고 있다 — 검출기의 `bore_ref_mm`(원통 전제 재설계에서
+#    만든 값). 메모에 *"다리 스트로크 상한, bore_ref_mm 필드 준비됨, 미착수"*
+#    로 남아 있던 항목이 이것이다.
+#      허용 신장 = (추적 관벽 − 휠반경) − 다리 밑동 반경 + 여유
+#      DN100: (50−8)−40 = 2mm → 여유 4mm 로 6mm
+#      DN150: (75−8)−40 = 27mm → 31mm
+# 🚨 관절 한계를 런타임에 바꾸는 것은 PhysX 로 안 넘어간다(기록) → **힘 지령**
+#    으로 막는다. 상한을 넘은 다리는 '벽 없음' 과 같게 안쪽으로 당긴다.
+LEG_BORE_CAP = os.environ.get("LEG_BORE_CAP", "1") == "1"
+# 🚨 여유가 너무 빡빡하면 **정상 다리까지 '상한 초과 = 벽 없음'으로 걸린다**
+#    (실측: 여유 4mm → 상한 3mm → 뜬다리 4~6개가 상시 발생). 추적 관경 자체가
+#    46~47mm 로 실제(49~50)보다 작게 읽히는 계측 오차도 여기에 얹힌다.
+#    → 여유 10mm. 정상 다리(신장 0~3mm)는 안 걸리고, 폭주한 다리(31mm)는
+#      9mm 에서 막힌다. **정밀 제한이 아니라 폭주 방지턱**이다.
+LEG_CAP_MARGIN = float(os.environ.get("LEG_CAP_MARGIN", 0.010))
+
+
+def leg_max_ext(r):
+    """추적 관경이 허용하는 다리 신장 상한(m). 판정이 없으면 상한을 안 건다."""
+    if not LEG_BORE_CAP:
+        return PISTON_STROKE
+    _c = r.get("cond")
+    _b = float(getattr(_c, "bore_ref_mm", 0.0) or 0.0) / 1000.0 if _c else 0.0
+    if _b <= 0.0:
+        _b = PIPE_IR                      # 판정 전에는 설계 DN100 으로 본다
+    _cap = (_b - WHEEL_R) - TUNE["wheel_center_mm"] / 1000.0 + LEG_CAP_MARGIN
+    return float(min(max(_cap, 0.002), PISTON_STROKE))
+
+
+def exit_fold_legs(r):
+    """관구 밖(중심선 시작점에 클램프)으로 나간 **다리 DOF** 집합.
+
+    🎯 완전 탈출용 (2026-08-10 사용자: *"몸 전체가 배수구 관 밖으로"*).
+       "전부 벽을 잃으면 전부 민다" 규칙은 관 안 접합부용이다 — 관 밖에서
+       벽을 찾겠다고 다리를 만개하면 **관구 테두리에 우산처럼 걸린다**
+       (실측: 복귀 s=41→21 끼임 12회, 몸통·뒤 디스크 다리 6~9개가 35mm
+       만개, 휠 도달 62~118mm — 앞 3다리만 관 안). 관구 밖 세그먼트는 접고,
+       아직 관 안인 세그먼트가 남은 몸을 민다.
+    """
+    if r.get("phase") not in ("BACK", "EXIT") or r.get("cl") is None:
+        if r.get("exit_folded"):
+            r["exit_folded"].clear()
+        return ()
+    _sh6 = float(r.get("s_hint") or 1.0)
+    if min(_sh6, r["cl"].total - _sh6) > 0.30:    # 관구(양끝) 근처에서만 잰다
+        return ()
+    out = r.setdefault("exit_folded", set())
+    # 🚨 기준은 중심선 s 가 아니라 **관구 평면 위 높이** (2026-08-10 사용자
+    #    제보로 정정): 관구(중심선 끝, z=0) 위에 거름망 하우징 보어가
+    #    EXIT_BORE_H(85mm 실측)까지 이어져 **거기까지는 짚을 벽이 있다**.
+    #    s 기준(3mm)으로 접었더니 포켓 안에서 접지를 잃고 중력에 미끄러졌다
+    #    (사용자 GUI 관찰과 일치). 접기 = 보어 끝 위 / 펴기 = 40mm 히스테리시스.
+    # 🎯 **다리 단위로 접는다**: 세그먼트째 접으면 아직 벽이 있는 줄까지
+    #    한꺼번에 잃는다. 각 다리의 암 위치로 개별 판단.
+    _cl = r["cl"]
+    _p0 = _cl.p[0]
+    _u = _cl.tangent(0)               # +s = 관 안쪽(아래) 방향
+    _hmax = -1.0                       # 가장 높은 다리 — 저속·증강 게이트
+    for _k, _pr in r.get("leg_arm_of", {}).items():
+        _h = float(np.dot(_p0 - wpos(_pr), _u))   # 관구 평면 위 높이(m)
+        _hmax = max(_hmax, _h)
+        if _h > EXIT_RIM_H:               # 림 위 = 다시 편다(맨틀링)
+            out.discard(_k)
+        elif _h > EXIT_BORE_H:            # 공동·구멍 = 접는다
+            out.add(_k)
+        elif _h < EXIT_BORE_H - 0.04:
+            out.discard(_k)
+    # 🚨 감속 게이트도 **히스테리시스** — 경계에 걸치면 78↔20mm/s 가 매
+    #    스텝 널뛰어 덜컥거리다 끼임 판정을 받는다(GUI 실측: 감속선 −20mm
+    #    에서 물러남 반복). 켜기 −20 / 끄기 −60(되물림 50mm 가 넘겨 준다).
+    if _hmax > EXIT_SLOW_H:
+        r["exit_cavity"] = True
+    elif _hmax < EXIT_SLOW_H - 0.04:
+        r["exit_cavity"] = False
+    return out
+
+
 def force_legs(r):
     """다리 힘 지령 — 예압 + 중심 복원 + 뜬 다리 접기. 위치 목표를 안 쓴다."""
     if not r.get("piston"):
         return [], []
     q = np.asarray(r["art"].get_joint_positions())
+    _cap = leg_max_ext(r)
+    r["leg_cap"] = _cap
+    # 🎯 **개구 탐색 다리** (2026-08-10 저녁, T 쐐기 t6 실측으로 신설).
+    #    blueprint 는 관경 추적이 없어 캡이 12mm 고정인데, T 통과는 다리가
+    #    분기관 벽(82mm)을 짚어야 성립한다(만개 35 필요조건 — F 스윕 실측).
+    #    스케줄 조향이 "지금 원호 안, 개구는 선회 안쪽" 을 알려 주면
+    #    (sched_open_dir) **그쪽을 향한 다리만** 만개를 허용한다.
+    #    바깥쪽 다리는 캡 유지 — 곡관 외벽 래칫 관통 방지턱은 살아 있다.
+    # 리딩 디스크 접기 (t38) — 접기 대상 = 리딩 드럼 70mm 내의 다리
+    _fold_p = r.get("sched_fold_p")
+    _fold_ks = set()
+    if _fold_p is not None and r.get("leg_arm_of"):
+        _fr8 = float(os.environ.get("BP_TEE_FOLD_R", 0.045))
+        for _k8, _pr8 in r["leg_arm_of"].items():
+            if float(np.linalg.norm(wpos(_pr8) - _fold_p)) < _fr8:
+                _fold_ks.add(_k8)
+    # 🎯 T 구간 다리 소극 모드 (t45) — 접합부 반경 150mm 내 다리는 탐색·밀기
+    #    금지, 신장 ~5mm 만 유지 (바퀴 반경 45mm — 벽 있는 곳만 살짝 구른다).
+    _tee_p = r.get("sched_tee_p")
+    _tee_ks = set()
+    if _tee_p is not None and r.get("leg_arm_of"):
+        _tr9 = float(os.environ.get("BP_TEE_CALM_R", 0.150))
+        for _k9, _pr9 in r["leg_arm_of"].items():
+            if float(np.linalg.norm(wpos(_pr9) - _tee_p)) < _tr9:
+                _tee_ks.add(_k9)
+    # 발차기 다리 (t65) — 선회 반대측을 향한 다리: 강제 신장으로 몸을 민다
+    # 🎯 **위치 적응 다리** (t67 — 사용자 설계: 부위 구분 없이, 다리마다
+    #    "자기 위치에서 닿는 관"에 실린더를 맞춘다). T 구간의 각 다리를
+    #    두 관축(현재 가지 + 다른 가지) 중 가까운 쪽으로 판정:
+    #    회랑 안(<55mm) = 그 관 벽까지 자유 신장·파지(_open_ks 재사용 —
+    #    순수 예압·풀캡·접힘 면제) / 공동 위 = 소극(_tee_ks 아래 재구성).
+    _kick_ks = set()   # (t65 발차기는 회전 모멘트 사고로 폐지 — 파지가 견인)
+    _boost_ks = set()  # (t73 철회 — 미사용)
+    _mid9_ks = set()   # 몸통 전용 접기 세트 (t79 — 머리 세트와 완전 분리)
+    # 🚨 위치 적응은 **지정 T 한정** (t67 사용자: 가지→본관(복귀)만.
+    #    본관→가지(나가는 T)는 완성된 종전 레시피 그대로 둔다).
+    _adapt = {int(x) for x in
+              os.environ.get("BP_TEE_ADAPT_ARCS", "").split(",") if x}
+    _x9 = (r.get("sched_tee_mi") == -1)   # 크로스바 직진 횡단 (가상 구역)
+    if (_tee_p is not None and r.get("leg_arm_of")
+            and (r.get("sched_tee_mi") in _adapt or _x9)):
+        _cl6 = r["cl"]
+        _alt6 = r.get("sched_tee_alt")
+        _tee_ks2 = set()
+        # 🎯 **몸통만 움츠림** (t69 사용자 설계 — 머리=방향타·파지, 뒤=추진
+        #    이라 힘 유지, 몸통 다리의 강성 저항이 코너 진입을 막는다는
+        #    추측). 세그먼트를 드럼 거리로 분류해 두고, 코너 입구를 지난
+        #    **몸통 다리만 접는다.** 머리·뒤는 특수 모드 없이 정상 예압.
+        _sg_of = {k9: s9 for (s9, _i9), k9 in r["piston"].items()}
+        if "sched_mid_sg" not in r and r.get("mid_prim") is not None:
+            # 🚨 몸통 식별은 **Body 링크 실거리**로 (t70 — 드럼 거리 유추가
+            #    머리를 몸통으로 오인해 머리 다리를 접었다, 사용자 육안 확인).
+            _pm9 = wpos(r["mid_prim"])
+            _dd9 = {}
+            for _sg9 in set(_sg_of.values()):
+                _arms9 = [wpos(r["leg_arm_of"][k9]) for k9 in _sg_of
+                          if _sg_of[k9] == _sg9 and k9 in r["leg_arm_of"]]
+                if _arms9:
+                    _c9 = np.mean(np.array(_arms9), axis=0)
+                    _dd9[_sg9] = float(np.linalg.norm(_c9 - _pm9))
+            r["sched_mid_sg"] = (min(_dd9, key=_dd9.get) if _dd9 else None)
+            if r["sched_mid_sg"] is not None:
+                _nleg9 = sum(1 for v9 in _sg_of.values()
+                             if v9 == r["sched_mid_sg"])
+                print(f"[{r['name']:8s}] 몸통 세그 판별 = seg"
+                      f"{r['sched_mid_sg']} (다리 {_nleg9}개, Body 링크 기준)")
+        _ent6 = r.get("sched_tee_entry")
+        _mid_sg = r.get("sched_mid_sg")
+        for _k6 in list(_tee_ks):
+            _pa6 = wpos(r["leg_arm_of"][_k6])
+            _s6a, _off6, _ = _cl6.nearest(_pa6, r.get("s_hint"))
+            if _x9:
+                # 🎯 직진 횡단 (t76 — 전부 소극으로 눌러 회랑 안 다리까지
+                #    무력화했었다): 회랑 55mm 안 = 완전 파지 / 공동 = 소극.
+                if _off6 < 0.055:
+                    _kick_ks.add(_k6)     # 아래에서 파지(_open_ks)로 승격
+                else:
+                    _tee_ks2.add(_k6)
+                continue
+            # 🎯 접기 게이트 = **몸통 중심** 기준 (t73 사용자: 6개 중 3개만
+            #    접힘 — 다리별 게이트라 몸통이 입구에 걸친 동안 반만 접혔다).
+            if _mid_sg is not None and _sg_of.get(_k6) == _mid_sg:
+                # 🎯 접기 게이트 = **개구 창** (t80 계산 — "원호 진입" 게이트는
+                #    개구 128mm 전 멀쩡한 관에서 접어 접지만 잃었다. 몸통
+                #    중심이 립 구간(접합부 −50~+90mm)일 때만 접는다.)
+                # 접기 창도 **월드 y 직접** (t81 — 투영 s 바이어스 제거):
+                # 몸통 중심 y ∈ [795, 905] = 개구 립 구간 그 자체.
+                if r.get("mid_prim") is not None:
+                    _my6 = float(wpos(r["mid_prim"])[1])
+                    if 0.795 <= _my6 <= 0.905:
+                        _mid9_ks.add(_k6)  # 립 구간 — 6다리 일괄 접기
+        _tee_ks = _tee_ks2                # 소극 모드는 비움 (머리·뒤 정상)
+    _open = r.get("sched_open_dir")
+    _open_ks = set()
+    if _open is not None and r.get("leg_arm_of"):
+        _cl5 = r["cl"]
+        for _k5, _pr5 in r["leg_arm_of"].items():
+            _pa = wpos(_pr5)
+            _s5, _o5, _i5 = _cl5.nearest(_pa, r.get("s_hint"))
+            _rad = _pa - _cl5.p[_i5]
+            _t5 = _cl5.tangent(_i5)
+            _rad = _rad - _t5 * float(np.dot(_rad, _t5))
+            _n5 = float(np.linalg.norm(_rad))
+            if _n5 > 1e-6 and float(np.dot(_rad / _n5, _open)) > 0.5:
+                _open_ks.add(_k5)
+    _open_ks |= _kick_ks                 # 회랑 안 다리 = 파지(순수 예압·풀캡)
+    _kick_ks = set()
+    r["leg_open_n"] = len(_open_ks)
     vel = np.asarray(r["art"].get_joint_velocities())
     free = r.setdefault("leg_free", {})
     idx, val, nfree = [], [], 0
+    _xf = exit_fold_legs(r)              # 관구 밖 다리 → 강제 접기
     for sg in sorted({s2 for s2, _i in r["piston"]}):
         ks = [k for (s2, _i), k in sorted(r["piston"].items()) if s2 == sg]
+        for k in ks:
+            if k in _xf:
+                idx.append(k)
+                val.append(-LEG_FOLD_N)  # 당겨 접는다 — 우산 금지
+                free[k] = True
+                nfree += 1
+        ks = [k for k in ks if k not in _xf]
+        if not ks:
+            continue
         # 서 있는 다리 = 벽에 닿은 다리 → 그것들의 평균이 관벽 추정치
         stop = [k for k in ks if abs(float(vel[k])) < LEG_STOP_V]
         ref = float(np.mean(q[stop if stop else ks]))
         for k in ks:
             out = float(vel[k]) > LEG_FREE_V and q[k] > ref + LEG_REF_GAP
-            if out or q[k] >= PISTON_STROKE - LEG_FREE_MARGIN:
+            # 🎯 추적 관경이 허용하는 상한을 넘으면 **벽이 없는 것으로 본다**
+            #    — 관 안이라면 거기까지 뻗을 이유가 없다(관벽을 뚫은 것).
+            #    개구 탐색 다리(_open_ks)는 만개까지 허용 — 분기관 벽을 찾는다.
+            # 🚨 개구 탐색도 30mm 까지만 — 만개(35) 허용 + out 판정 면제
+            #    조합이 관벽 래칫 관통을 낳았다(2026-08-10 GUI 사용자 육안:
+            #    "다리가 배관을 뚫고 나온다"). 30mm 면 분기 개구 안 접지는
+            #    되고(t8 실측 31mm 도달) 관통 방지 판정은 살아 있다.
+            _cap_k = (min(PISTON_STROKE,
+                          float(os.environ.get("BP_OPEN_CAP", 0.030)))
+                      if k in _open_ks else _cap)
+            if out or q[k] >= _cap_k or q[k] >= PISTON_STROKE - LEG_FREE_MARGIN:
                 free[k] = True
             elif q[k] < ref + 0.5 * LEG_REF_GAP:
                 free[k] = False
@@ -1547,14 +2260,65 @@ def force_legs(r):
             cont = ks
             for k in ks:
                 free[k] = False
-        m = float(np.mean(q[cont]))
+        # 개구 탐색 다리는 평균에서 뺀다 — 만개 다리가 평균을 끌어올려
+        # 나머지 다리의 중심 복원을 흐트리지 않게.
+        _cm = [k for k in cont if k not in _open_ks] or cont
+        m = float(np.mean(q[_cm]))
+        # 탈출(공동 진입)이 시작되면 남은 접지 다리의 예압을 증강한다 —
+        # 줄어든 다리 수로 자중을 이겨야 한다(위 EXIT_PUSH_N 근거).
+        # 🎯 T 접합부 공동(포켓+팔+본관 합류)에서 뜬다리가 3개 이상이면
+        #    남은 접지 다리 예압 증강 — 탈출 공동과 같은 원리 (t20: 정점에서
+        #    뜬다리 5~6, 견인 구멍으로 정체).
+        _push = EXIT_PUSH_N if (_xf or r.get("exit_cavity")
+                                or (r.get("sched_arc")
+                                    and r.get("leg_free_n", 0) >= 3)) \
+            else PISTON_MAXF
+        if r.get("tape_boost"):
+            # 되감기 T 역통과 견인 증강 (t91 실측: 헛돎 — 예압 2배)
+            _push = max(_push, float(os.environ.get("BP_TAPE_N", 18.0)))
         for k in ks:
             idx.append(k)
-            if free.get(k):
+            if k in _mid9_ks:
+                # 🎯 립 창 소극 −3mm (t82 매트릭스 결론 — 접기(-15 풀수축)는
+                #    지지 상실로 역효과, 소극 +5mm 는 립을 8mm 찌른다.
+                #    목표만 −3mm 로 내려 바퀴를 립 안쪽으로 살짝 들인다.)
+                val.append(float(np.clip(
+                    LEG_KC * (-0.003 - float(q[k])), -20.0, 8.0)))
+                free[k] = False
+            elif k in _fold_ks:
+                # 🎯 머리 3단계 (t83 단면 계산 — 머리+다리 단면 50~53mm 는
+                #    개구 구경 50mm 를 못 지난다. 구멍 통과 순간만 −8mm 수축
+                #    (단면 40 → 클리어런스 10mm), 본관 안에서 +2 재접지):
+                #    접근(x>720) 소극 +5 / 통과(640~720) 수축 −8 / 안(<640) +2.
+                _hx8 = float(_fold_p[0]) if _fold_p is not None else 9.0
+                if 0.640 <= _hx8 <= 0.720:
+                    _tq8 = -0.008
+                elif _hx8 < 0.640:
+                    _tq8 = 0.002
+                else:
+                    _tq8 = 0.005
+                val.append(float(np.clip(
+                    LEG_KC * (_tq8 - float(q[k])), -25.0, 10.0)))
+                free[k] = False
+            elif k in _kick_ks:
+                # 발차기 — 반대측 벽을 차서 몸을 본관으로 민다 (t65)
+                val.append(float(os.environ.get("BP_TEE_KICK_N", 30.0)))
+                free[k] = False
+            elif k in _tee_ks:
+                # 소극 모드: 5mm 목표로 온건한 비례력 — 뻗지도 접지도 않는다
+                val.append(float(np.clip(
+                    LEG_KC * (0.005 - float(q[k])), -20.0, 12.0)))
+                free[k] = False
+            elif free.get(k):
                 val.append(-LEG_FOLD_N)
                 nfree += 1
+            elif k in _open_ks:
+                # 🎯 개구 탐색 — 중심 복원 없이 순수 예압으로 민다. 복원항을
+                #    같이 주면 평균(~2mm)보다 나간 만큼 도로 당겨져 **만개가
+                #    원리적으로 불가능**했다(t7 실측: 캡 풀어도 15mm 정체).
+                val.append(_push)
             else:
-                val.append(PISTON_MAXF + LEG_KC * (m - float(q[k])))
+                val.append(_push + LEG_KC * (m - float(q[k])))
     r["leg_free_n"] = nfree
     r["leg_free_max"] = max(r.get("leg_free_max", 0), nfree)
     r["leg_spread"] = float(np.ptp(q[list(r["piston"].values())]))
@@ -1631,8 +2395,18 @@ def center_legs(r):
     eff = leg_efforts(r)
     free = r.setdefault("leg_free", {})
     idx, val, nfree = [], [], 0
+    _xf = exit_fold_legs(r)              # 관구 밖 다리 → 강제 접기
     for sg in sorted({s for s, _i in r["piston"]}):
         ks = [k for (s2, _i), k in sorted(r["piston"].items()) if s2 == sg]
+        for k in ks:
+            if k in _xf:
+                idx.append(k)
+                val.append(-PISTON_RETRACT if PISTON_RETRACT > 0 else LEG_FOLD)
+                free[k] = True
+                nfree += 1
+        ks = [k for k in ks if k not in _xf]
+        if not ks:
+            continue
         # 🚨 **중앙값 기준으로 미리 잡으려던 것은 되돌렸다** (실측 악화:
         #    `tee_in` 끼임 2→3회). 접합부에서는 한 세그먼트의 다리 **대부분**이
         #    벽을 잃어 중앙값 자체가 뜬 다리 쪽으로 끌려가므로 기준이 못 된다.
@@ -1662,6 +2436,25 @@ def center_legs(r):
     return idx, val
 
 
+def sync_rollbend_cmds(r):
+    """방향 전환 순간 롤·굽힘 지령 적분기를 **실측 관절각으로 동기화**한다.
+
+    🚨 끼임 되물림에서 지령이 물러나기 이전 값(예: 롤 −145°)에 남아 있으면
+       복원 순간 목표 접선이 뒤집혀 오차가 한 번에 벌어지고, 45°/s 슬루가
+       다리가 분기 벽에 물린 채로 몸을 비틀어 **개구로 사출**시켰다
+       (2026-08-10 floor1 A런 실측: 복원 직후 이탈 134mm 즉사).
+    """
+    if not r.get("bend_front"):
+        return
+    _qq = np.asarray(r["art"].get_joint_positions())
+    r["cmd_roll"] = float(np.sum(_qq[r["roll_front"]]))
+    r["cmd_bend"] = float(np.sum(_qq[r["bend_front"]]))
+    r["cmd_roll_r"] = float(np.sum(_qq[[k for k in r["roll_dof"]
+                                        if k not in r["roll_front"]]]))
+    r["cmd_bend_r"] = float(np.sum(_qq[[k for k in r["bend_dof"]
+                                        if k not in r["bend_front"]]]))
+
+
 def diag_stuck(r):
     """끼임 순간의 몸통·다리·휠 상태를 찍는다.
 
@@ -1671,6 +2464,14 @@ def diag_stuck(r):
     """
     cl = r["cl"]
     q = np.asarray(r["art"].get_joint_positions())
+    # 탈출 접기 상태 — 왜 접기/저속이 발동 안 하는지 가른다 (2026-08-10)
+    _u0 = cl.tangent(0)
+    _hs = {k: float(np.dot(cl.p[0] - wpos(_pr), _u0))
+           for k, _pr in r.get("leg_arm_of", {}).items()}
+    print(f"           [진단] 탈출: phase={r.get('phase')} "
+          f"cavity={r.get('exit_cavity')} 접힘={sorted(r.get('exit_folded', set()))} "
+          f"매핑={len(r.get('leg_arm_of', {}))}개 "
+          f"다리높이(mm)={[f'{v * 1000:+.0f}' for v in sorted(_hs.values())]}")
     p0, p1 = wpos(r["seg0"]), wpos(r["seg1"])
     s0, o0, _ = cl.nearest(p0, r.get("s_hint"))
     s1, o1, _ = cl.nearest(p1, r.get("s_hint"))
@@ -1703,6 +2504,744 @@ def diag_stuck(r):
 # 분기 방위를 시야에서 잃은 뒤에도 이만큼은 그 방향을 유지한다(진입 중에는
 # 개구가 화면 밖으로 벗어난다).
 BRANCH_HOLD_S = float(os.environ.get("BRANCH_HOLD_S", 3.0))
+
+
+def _cl_arcs(cl):
+    """중심선의 원호 구간 목록 [(s0, s1, i0, i1), …] — 접선 회전율로 검출."""
+    n = len(cl.s)
+    ts = np.array([cl.tangent(i) for i in range(n)])
+    out, bent = [], None
+    for i in range(1, n):
+        dth = math.acos(max(-1.0, min(1.0, float(np.dot(ts[i], ts[i - 1])))))
+        ds = max(float(cl.s[i] - cl.s[i - 1]), 1e-9)
+        if dth / ds > BP_ARC_KAPPA:
+            if bent is None:
+                bent = i - 1
+        elif bent is not None:
+            out.append((float(cl.s[bent]), float(cl.s[i - 1]), bent, i - 1))
+            bent = None
+    if bent is not None:
+        out.append((float(cl.s[bent]), float(cl.s[n - 1]), bent, n - 1))
+    return out
+
+
+def _cl_arc_meta(cl):
+    """원호 구간에 진입·출구 접선과 꺾임각을 붙인다 — 스케줄 조향의 지도."""
+    n = len(cl.s)
+    out = []
+    for s0, s1, i0, i1 in _cl_arcs(cl):
+        t_in = cl.tangent(max(i0 - 2, 0))
+        t_out = cl.tangent(min(i1 + 2, n - 1))
+        ang = math.degrees(math.acos(max(-1.0, min(1.0,
+                                                   float(np.dot(t_in, t_out))))))
+        out.append(dict(s0=s0, s1=s1, t_in=np.asarray(t_in),
+                        t_out=np.asarray(t_out), ang=ang))
+    return out
+
+
+def steer_bp_sched(r):
+    """🎯 **스케줄 조향** (2026-08-10 저녁) — v9 T 통과 레시피의 정답지판.
+
+    구조는 BP_SCHED 상수 주석 참조. 드럼(앞/뒤)마다 제 위치 s 로 국면을 정한다:
+      PRE(진입 전 직선) : 굽힘을 펴고 롤을 원호 평면으로 조준.
+                          지령 = **실측 관절각 + 오차**(앵커) — 적분 폭주 불가.
+      ARC/LAG(원호 안~끝+LAG) : 롤 동결, 고정 굽힘(부호는 PRE 에서 확정).
+      그 외(직선)       : 굽힘 0, 롤 유지(아무것도 안 쫓는다).
+    국면이 겹치면 ARC 중심부 > PRE > LAG — 연속 원호(floor2 곡관1→2)에서
+    앞 원호의 LAG 유지보다 다음 원호의 재조준이 우선해야 하기 때문.
+    """
+    if not r.get("bend_front"):
+        return [], []
+    cl = r["cl"]
+    p1 = wpos(r["seg1"])
+    s1, _o, _ = cl.nearest(p1, r.get("s_hint"))
+    lim = math.radians(STEER_RATE) * PHYSICS_DT
+
+    # 관구 접근은 라이저 직선 — 굽힘을 편다 (EXIT_STRAIGHT_S 주석).
+    # 한붓그리기 코스(끝 = 배수구)는 **끝쪽** 라이저에서도 같게 편다.
+    if r.get("phase") in ("BACK", "EXIT") and (
+            s1 < EXIT_STRAIGHT_S or (cl.total - s1) < EXIT_STRAIGHT_S):
+        _cb = r.get("cmd_bend", 0.0)
+        _cbr2 = r.get("cmd_bend_r", 0.0)
+        _cb += max(-lim, min(lim, -_cb))
+        _cbr2 += max(-lim, min(lim, -_cbr2))
+        r["cmd_bend"], r["cmd_bend_r"] = _cb, _cbr2
+        r["bp_f_deg"], r["bp_r_deg"] = math.degrees(_cb), math.degrees(_cbr2)
+        _rb2 = [k for k in r["bend_dof"] if k not in r["bend_front"]]
+        _rr2 = [k for k in r["roll_dof"] if k not in r["roll_front"]]
+        return (r["roll_front"] + r["bend_front"] + _rr2 + _rb2,
+                [r.get("cmd_roll", 0.0)] * len(r["roll_front"])
+                + [_cb] * len(r["bend_front"])
+                + [r.get("cmd_roll_r", 0.0)] * len(_rr2)
+                + [_cbr2] * len(_rb2))
+
+    metas = r.get("cl_arc_meta")
+    if metas is None:
+        metas = r["cl_arc_meta"] = _cl_arc_meta(cl)
+        print(f"  {r['name']}: 스케줄 원호 "
+              + ", ".join(f"#{i}[{m['s0'] * 1000:.0f}~{m['s1'] * 1000:.0f}mm "
+                          f"{m['ang']:.0f}°]" for i, m in enumerate(metas)))
+    # 🚨 국면 판정은 **임무 방향**으로 — 순간 dir(끼임 되물림에 뒤집힘)로
+    #    하면 물러날 때마다 PRE 가 앞뒤 원호로 널뛰며 롤이 요동한다
+    #    (t4 실측: s=481 데드락, 끼임 16회, 롤 -20↔-67° 왕복).
+    d = -1 if r.get("phase") in ("BACK", "EXIT") else 1
+    st = r.setdefault("sched", {})
+    _q = np.asarray(r["art"].get_joint_positions())
+
+    def _drum_cmd(drum, roll_dofs, bend_dofs, cr_key, cb_key, aim_sign, tag):
+        _cr = r.get(cr_key, 0.0)
+        _cb = r.get(cb_key, 0.0)
+        if drum is None:
+            return _cr, _cb
+        sd, _od, _ = cl.nearest(wpos(drum), r.get("s_hint"))
+        # ── 국면 판정 (ARC 중심부 > PRE > LAG) ──────────────────────
+        zone, meta, mi = None, None, -1
+        for pri in ("CORE", "PRE", "LAG"):
+            for i, m in enumerate(metas):
+                if pri == "CORE" and m["s0"] <= sd <= m["s1"]:
+                    zone, meta, mi = "ARC", m, i
+                elif pri == "PRE" and (
+                        (d > 0 and m["s0"] - BP_SCHED_PRE <= sd < m["s0"]) or
+                        (d < 0 and m["s1"] < sd <= m["s1"] + BP_SCHED_PRE)):
+                    zone, meta, mi = "PRE", m, i
+                elif pri == "LAG" and (
+                        (d > 0 and m["s1"] < sd <= m["s1"] + BP_SCHED_LAG) or
+                        (d < 0 and m["s0"] - BP_SCHED_LAG <= sd < m["s0"])):
+                    zone, meta, mi = "ARC", m, i
+                if zone:
+                    break
+            if zone:
+                break
+        _zk, _sk = tag + "_zone", tag + "_sign"
+        if zone is None:                       # 직선 — 편다, 롤은 그대로 둔다
+            _cb += max(-lim, min(lim, -_cb))
+            st.pop(tag + "_go", None)          # 뒤 발동 래치 해제 (다음 원호용)
+            st.pop("seat_s", None)             # 안착 래치 해제
+            if st.pop(_sk, None) is not None or st.get(_zk) is not None:
+                st[_zk] = None
+            r[cr_key], r[cb_key] = _cr, _cb
+            return _cr, _cb
+
+        # 진행 방향 기준 진입/출구 접선 → 굽힘 평면 목표(출구가 벌어지는 쪽)
+        _u = meta["t_in"] if d > 0 else -meta["t_out"]
+        _v = meta["t_out"] if d > 0 else -meta["t_in"]
+        _pl = _v - _u * float(np.dot(_v, _u))
+        _pn = float(np.linalg.norm(_pl))
+
+        _Rd = wrot(drum)
+        _xd = _Rd @ np.array([1.0, 0.0, 0.0])
+        _bd = np.cross(_Rd @ np.array([0.0, 1.0, 0.0]), _xd)
+
+        def _aim_once():
+            """현재 자세에서 (롤 오차, 굽힘 부호) 한 번 측정."""
+            _w = _pl - _xd * float(np.dot(_pl, _xd))
+            _n2 = float(np.linalg.norm(_w))
+            if _pn < 1e-6 or _n2 < 1e-6:
+                return 0.0, st.get(_sk, 1.0)
+            _w = _w / _n2
+            _e = math.atan2(float(np.dot(np.cross(_bd, _w), _xd)),
+                            float(np.dot(_bd, _w)))
+            _sg = 1.0
+            if _e > math.pi / 2:
+                _e -= math.pi
+                _sg = -1.0
+            elif _e < -math.pi / 2:
+                _e += math.pi
+                _sg = -1.0
+            return _e, _sg
+
+        if zone == "PRE":
+            _cb += max(-lim, min(lim, -_cb))       # 펴면서 조준한다
+            # 🚨 굽힘이 남아 있으면 롤을 안 돌린다 (v9 ROLL_LOCK_AT 의 역방향
+            #    게이트) — 연속 원호에서 직전 굽힘이 펴지기 전에 돌리면 그게
+            #    곧 요동이다. 펴진 뒤에만 조준한다.
+            _e, _sg = math.pi, st.get(_sk, 0.0)    # 미조준 기본값
+            if abs(_cb) <= math.radians(8.0):
+                _e, _sg = _aim_once()
+                st[_sk] = _sg
+                # 🔑 앵커: 목표 = **실측 롤** + 오차 (v9 base=_roll_actual 이식)
+                _qr = float(np.sum(_q[roll_dofs]))
+                _stp = math.radians(BP_SCHED_STEP)
+                _tr = _qr + aim_sign * max(-_stp, min(_stp, _e))
+                _cr += max(-lim, min(lim, _tr - _cr))
+            # 🎯 조준이 덜 됐으면 **감속** — floor1 은 곡관→T 직선이 80mm 뿐
+            #    이라(원호#0 끝 421 → #1 시작 501) 순항 속도로는 90° 평면
+            #    전환(45°/s = 2s)이 물리적으로 안 끝난다. v9 는 긴 조주로가
+            #    있었다 — 여기서는 속도를 내려 같은 시간을 번다.
+            if abs(_e) > math.radians(15.0):
+                r["sched_slow"] = min(r.get("sched_slow", 1.0), 0.25)
+            if st.get(_zk) != ("PRE", mi):
+                st[_zk] = ("PRE", mi)
+                print(f"[{r['name']:8s}] 🧭 {tag} 원호#{mi} 조준 시작 "
+                      f"(s={sd * 1000:.0f}mm, 오차 {math.degrees(_e):+.0f}°, "
+                      f"부호 {_sg:+.0f})")
+        else:                                      # ARC/LAG — 롤 동결, 고정 굽힘
+            r["sched_arc"] = True                  # 접합부 공동 대응 게이트
+            if (tag == "앞") == (d > 0):           # 리딩 드럼 위치 공유 (LAG용)
+                r["sched_lead_sd"] = sd
+            _sg = st.get(_sk)
+            if _sg is None:                        # 조준 없이 원호에 든 경우
+                _e, _sg = _aim_once()              # 부호만 한 번 정하고 동결
+                st[_sk] = _sg
+            # 🚨 **오른손 법칙 검증** (2026-08-10 GUI — 사용자 육안: 로봇이
+            #    왼팔(+Y)로 꺾었다). 조준 부호가 초기 조건에 따라 뒤집힌다
+            #    (t16 롤F +21 vs 이전 런 -91). 원호 안에서 매 스텝 실측
+            #    꺾임 방향(_bd×부호)과 코스 선회 방향(_pl)을 대조해, 반대면
+            #    부호를 뒤집는다. 히스테리시스 -0.3 — 경계 널뛰기 방지.
+            if _pn > 1e-9:
+                _w4 = _pl - _xd * float(np.dot(_pl, _xd))
+                _n4 = float(np.linalg.norm(_w4))
+                if _n4 > 1e-6:
+                    _dd4 = float(np.dot(_bd, _w4 / _n4)) * _sg
+                    if _dd4 < -0.3:
+                        _sg = st[_sk] = -_sg
+                        print(f"[{r['name']:8s}] ↪ {tag} 굽힘 부호 반전 — "
+                              f"실측 꺾임이 코스 반대(오른손 위반, "
+                              f"dot={_dd4:+.2f}, s={sd * 1000:.0f}mm)")
+            # 🎯 **끼임 단계 증강** (2026-08-10 t8 — v9 스케줄 재계산 근거).
+            #    v9 조원 스케줄은 T 에서 앞 관절 피크를 **90°** 까지 올린다
+            #    (TOTAL_BEND 90, tF−tB_front 프로파일). 반면 곡관은 85° 가
+            #    악화 실측(D/E 스윕) — 그래서 일괄 90 이 아니라 **끼임이
+            #    증명한 만큼만** 올린다: 기본 40°, 이 원호에서 끼임 1회당
+            #    +BP_SCHED_ESC(15°), 상한 = 원호 꺾임각. 곡관은 안 끼므로
+            #    40 유지, T 쐐기는 40→55→70→85→90.
+            _esc = max(0, int(r.get("stuck", 0)) - int(st.get(tag + "_st0", 0)))
+            # 🎯 **평탄 증강 — 리딩 관절만** (2026-08-10 맵 v2 후 t18 확정).
+            #    맵 v2 는 T 가 실제 R150 필렛이다 → 원호 전체에서 일정하게
+            #    꺾는 것이 옳다. 필렛인데 40° 로는 정면 포켓(외벽이 비는
+            #    구간)으로 흘러 캡에 박힌다(t18: 진입 추적 완벽, 코너 중심
+            #    s=705 포켓행) → 끼임이 증명한 만큼 리딩 관절만 +15°씩.
+            #    트레일링까지 같이 올리면 U자 쐐기(t9 실측).
+            _lead = (tag == "앞") == (d > 0)
+            # 트레일링 굽힘 배율 (t24 — "앞만 꺾는 게 최고" 단독 실측의
+            # 스케줄판. 0 = 뒤 곧게 펴고 직진 추력 전담)
+            _rsc = float(os.environ.get("BP_SCHED_REAR", 1.0))
+            # 🎯 굽힘각 분리 (t45 — 사용자 육안: 수직곡관부터 문제. T용
+            #    70° 가 env 로 **모든 원호**에 걸려 곡관 과굴절을 만들었다.
+            #    곡관은 floor2 검증값 40°(BP_SCHED_BEND 기본), T 만 BP_TEE_BEND).
+            _tee = {int(x) for x in
+                    os.environ.get("BP_TEE_ARCS", "").split(",") if x}
+            _bb = (float(os.environ.get("BP_TEE_BEND", 70.0))
+                   if mi in _tee else BP_SCHED_BEND)
+            if _esc > 0 and _lead:
+                r["sched_corner"] = True
+                _bm = min(meta["ang"],
+                          _bb
+                          + float(os.environ.get("BP_SCHED_ESC", 15.0)) * _esc)
+            else:
+                _bm = min(meta["ang"], _bb)
+            # 🎯 2단 각도 (t25 — 필렛 추종은 70°가 정답이나 90° 코너의
+            #    마지막 팔 진입은 정렬각이 더 필요해 s=758 점근 정체).
+            #    정점(중점) 이후 리딩 관절만 BEND2 로 올린다. 위치 기반 —
+            #    끼임 기반 증강(잭나이프 전례)과 다르게 경로 정위에서 상승.
+            # 🚨 2단 각도는 **T 원호에만** (t26 실측: 전 원호 적용 시 진입
+            #    곡관 후반 88° → 곡관 탈출 자세 붕괴 → T 선조준이 틀린
+            #    평면(+54)에 잠김). 정답지는 도면을 아는 주행 — T 지정 정당.
+            _b2 = float(os.environ.get("BP_SCHED_BEND2", 0.0))
+            if _b2 > 0 and _lead and mi in _tee:
+                _u5 = d * (sd - 0.5 * (meta["s0"] + meta["s1"]))
+                if _u5 > 0:
+                    _bm = min(meta["ang"], max(_bm, _b2))
+            if not _lead:
+                # 🎯 뒤 관절 지연 발동 (t27 — 뒤 0° 고정은 진입엔 정답이나
+                #    몸통이 코너에 닿는 s=744 부터는 일자 강체가 코너에 안
+                #    낀다. v9 의 LAG 개념: 뒤는 곧게 밀다 코너 근접 시 꺾는다).
+                # 🎯 v9 원형 LAG (t32 확정 — 힘 6배로도 s=758 불변 = 뒤 0°
+                #    고정은 기하 한계. 몸이 코너를 돌려면 뒤도 결국 꺾여야
+                #    하고, 그 시점은 **리딩 드럼이 코너+LAG 를 지날 때**다.
+                #    리딩 드럼 위치는 정지해도 유효한 신호 — t29 순환 없음).
+                _lag7 = float(os.environ.get("BP_SCHED_LAG2", -1.0))
+                _dly9 = {int(x) for x in
+                         os.environ.get("BP_TEE_DELAY_ARCS", "").split(",")
+                         if x}
+                if mi in _dly9 and r.get("sched_xfer_w") is not None:
+                    # 굽힘 이관의 뒤쪽 절반 — 뒤 = 총량 × w (래치 대체)
+                    _bm = min(meta["ang"],
+                              float(os.environ.get("BP_TEE_BEND", 70.0))) \
+                        * float(r["sched_xfer_w"])
+                elif _lag7 >= 0 and mi in _tee:
+                    # 🎯 래치 발동 (t33 — 정지점이 런마다 705~758 로 흔들려
+                    #    거리 트리거는 도박. **끼임 이벤트 = 강체 국면 종료
+                    #    신호**로 쓴다, 임무 규칙 8 과 같은 원리). 거리(LAG)
+                    #    트리거는 보조로 병행. 발동 후 원호 이탈까지 유지.
+                    if not st.get(tag + "_go"):
+                        _ld7 = r.get("sched_lead_sd")
+                        _sc7 = 0.5 * (meta["s0"] + meta["s1"])
+                        _pp6 = (d * (_ld7 - _sc7)
+                                if _ld7 is not None else -1.0)
+                        _jam7 = (int(r.get("stuck", 0))
+                                 > int(st.get(tag + "_st0", 0))) and \
+                            d * (float(r.get("s_hint") or sd) - _sc7) > -0.03
+                        if _pp6 > _lag7 or _jam7:
+                            st[tag + "_go"] = True
+                            print(f"[{r['name']:8s}] 🔓 뒤 굽힘 발동 "
+                                  f"({'끼임 래치' if _jam7 else 'LAG'}, "
+                                  f"s={sd * 1000:.0f}mm)")
+                    if not st.get(tag + "_go"):
+                        _bm = 0.0          # 발동 전: 직진 추력
+                elif mi in _tee:
+                    _bm *= _rsc
+                # 🎯 T 외 원호(곡관)는 뒤도 그대로 꺾는다 (t46 로그 대조:
+                #    floor2 정상 신호 = F-40/R-40 인데 BP_SCHED_REAR=0 이
+                #    전 원호에 걸려 곡관 자세가 달랐다 — T 한정으로 격리)
+            # (구) 각진 코너용 이동 범프 + 뒤 컴플라이언스 — 맵 v2 에서는
+            # 역효과(꺾음 지연 → 포켓 진입 후 꺾음). BP_SCHED_SHARP=1 로만 복원.
+            if _esc > 0 and os.environ.get("BP_SCHED_SHARP", "0") == "1":
+                def _ss3(x):
+                    x = max(0.0, min(1.0, x))
+                    return x * x * (3.0 - 2.0 * x)
+                _sc = 0.5 * (meta["s0"] + meta["s1"])
+                _pp = d * (sd - _sc)
+                _W = float(os.environ.get("BP_SCHED_W", 0.056))
+                _LG = float(os.environ.get("BP_SCHED_JLAG", 0.048))
+                _bm *= _ss3((_pp + _W) / _W) - _ss3((_pp - _LG) / _W)
+            # 🎯 굽힘 발동 지연 (t63 사용자 관찰 — 복귀 T 에서 코너 128mm
+            #    전부터 꺾인 머리가 옆면으로 벽을 긁어 입구 전에 정지.
+            #    지정 원호의 리딩 굽힘을 코너 −BP_TEE_BEND_AT 까지 0 유지.
+            #    25mm/s 에서 70° 완성에 40mm — 60mm 전 발동이면 코너 직전 완성).
+            _dly8 = {int(x) for x in
+                     os.environ.get("BP_TEE_DELAY_ARCS", "").split(",") if x}
+            if mi in _dly8 and _lead:
+                # 🎯 **곡선 램프** (t71 사용자: "한 번에 팍 꺾으니 벽 밀기가
+                #    된다 — 곡선으로 천천히 접어 방향을 맞춰라"). 종전
+                #    지연-계단(코너 60mm 전 0 → 40mm 만에 70°)을 폐기하고,
+                #    진입→정점 128mm 에 걸쳐 smoothstep 으로 0→70°
+                #    (25mm/s 기준 ~14°/s — 매 순간 경로 곡률과 일치).
+                _sc8 = 0.5 * (meta["s0"] + meta["s1"])
+                # 🎯 램프 트리거 = **월드 좌표 직접** (t81 사용자 지적 적중 —
+                #    필렛 투영 s 는 코너 근처에서 실제보다 30~40mm 앞서 읽혀
+                #    "입구 전 꺾임"을 만들었다. 머리 드럼의 물리 y 로 건다:
+                #    y=960 시작 → y=905(개구선 도달) 만각.)
+                _dpy = wpos(drum) if drum is not None else None
+                if _dpy is not None:
+                    _u8 = max(0.0, min(1.0,
+                                       (0.960 - float(_dpy[1])) / 0.055))
+                else:
+                    _u8 = 0.0
+                _bm *= _u8 * _u8 * (3.0 - 2.0 * _u8)
+                # 🎯 굽힘 이관은 **머리 안착 후에만** (총 90° 보존, 앞→뒤).
+                #    안착 = 머리 드럼이 본관 회랑(x<690, |y−850|<45) 진입.
+                _w9 = 0.0
+                _dp10 = wpos(drum) if drum is not None else None
+                if (_dp10 is not None and float(_dp10[0]) < 0.690
+                        and abs(float(_dp10[1]) - 0.850) < 0.045
+                        and st.get("seat_s") is None):
+                    st["seat_s"] = float(r.get("s_hint") or sd)
+                    print(f"[{r['name']:8s}] ⚓ 머리 본관 안착 — 굽힘 이관 시작"
+                          f" (x={_dp10[0] * 1000:.0f}mm)")
+                if st.get("seat_s") is not None:
+                    _w9 = max(0.0, min(1.0, d * (float(r.get("s_hint") or sd)
+                                                 - st["seat_s"]) / 0.10))
+                _bm *= (1.0 - _w9)
+                r["sched_xfer_w"] = _w9   # 뒤 관절이 같은 w 를 쓴다
+            _bt = _sg * math.radians(_bm)
+            if os.environ.get("BP_SCHED_SHARP", "0") == "1" \
+                    and r["sched_corner"] and tag == "뒤":
+                _bt = float(np.sum(_q[bend_dofs]))
+            _cb += max(-lim, min(lim, _bt - _cb))
+            # 🎯 T 구간 다리 군기 (2026-08-10 저녁 — 사용자 육안: "다리가
+            #    쓸데없이 발산". 공동에서 개구 탐색·허공 밀기가 구멍마다
+            #    다리를 쑤셔넣어 갈림날·이음새에 걸렸다. v9 T 통과 조건이
+            #    다리 ±4mm 고정이었던 것과 정합 — T 에선 다리를 붙인다):
+            #    접합부 중심을 force_legs 에 넘겨 반경 내 다리를 소극 모드로.
+            if mi in _tee:
+                _ci = int(np.argmin(np.abs(
+                    cl.s - 0.5 * (meta["s0"] + meta["s1"]))))
+                r["sched_tee_p"] = cl.p[_ci]
+                r["sched_tee_mi"] = mi     # 어느 T 인지 (적응 다리 게이트용)
+                # 코너 입구 s (진행 방향 기준) — "입구를 지난 다리만 소극/적응"
+                r["sched_tee_entry"] = ((meta["s0"] if d > 0 else meta["s1"]),
+                                        d)
+                r["sched_tee_sc"] = 0.5 * (meta["s0"] + meta["s1"])
+                # 다른 가지의 중심 s — 위치 적응 다리의 2차 탐색창 (t67)
+                _oth = [j for j in _tee if j != mi and j < len(metas)]
+                r["sched_tee_alt"] = (0.5 * (metas[_oth[0]]["s0"]
+                                             + metas[_oth[0]]["s1"])
+                                      if _oth else None)
+                # 🎯 T 원호 안 저속 캡 (t56 — 복귀 T 에서 45mm/s 로는 굽힘이
+                #    자세를 만들기 전에 턴인 지점을 지나쳐 오른팔로 드리프트.
+                #    나가는 T 성공 조건이 조준 감속 25mm/s 였던 것과 정합).
+                r["sched_slow"] = min(r.get("sched_slow", 1.0),
+                                      float(os.environ.get("BP_TEE_V", 0.25)))
+            elif _pn > 1e-9:
+                # 개구 탐색은 T 이외 원호에서만 (기존 로직 유지)
+                r["sched_open_dir"] = _pl / _pn
+            # 🎯 **리딩 디스크 접기** (t37 — 토크 16배로도 s=731 불변 = 걸림.
+            #    welder_126 의 T 통과 실측(08-07)은 다리 **수축**이었다.
+            #    T 공동에서 리딩 디스크 다리를 접어 걸림을 없애고, 뒤가
+            #    접지·추진을 전담한다 — 배수구 탈출 접기와 같은 원리).
+            # 접기는 지정 원호에만 (t59 — 양쪽 T 에 걸자 잘 되던 나가는 T 가
+            # 머리 접지 상실로 몸롤 +146° 구름. 사용자 지시: 복귀 T 한정)
+            _fold_arcs = {int(x) for x in
+                          os.environ.get("BP_TEE_FOLD_ARCS", "").split(",")
+                          if x}
+            if mi in _fold_arcs and _lead and drum is not None:
+                # 🎯 2단 머리 다리 (t60 로그 — 접힌 머리는 열린 본관 입구에서
+                #    누를 벽이 없어 앵커 부재 → 뒤 추력이 회전 모멘트를 못
+                #    만든다. 머리가 본관 보어 회랑에 들어오면 접기를 풀어
+                #    벽을 재파지 = 앵커 생성, 뒤 추력이 그 축으로 몸을 꺾음).
+                # 머리 세트는 **항상** 지정 (t79 — 안착 게이트가 세트 생성을
+                # 막아 머리가 소극으로 떨어졌던 버그 제거. grip/fold 는
+                # force_legs 의 머리 전용 분기가 정한다.)
+                _dpF = wpos(drum)
+                r["sched_fold_p"] = _dpF
+                # 🎯 진입 확정 저속 (t85 계산 — 45mm/s 는 확정 창(오버슛
+                #    허용 ~30mm)을 0.7초에 지나쳐 "훅 통과". 필요 시간 2.1초
+                #    (뒤 LAG 램프 1.6s + 정착 0.5s) → v ≤ 14 → 12mm/s.
+                #    구간: 머리 y<965(입구 55mm 전) ~ 머리 x<660(본관 물림).
+                if float(_dpF[1]) < 0.965 and float(_dpF[0]) > 0.660:
+                    r["sched_slow"] = min(
+                        r["sched_slow"],
+                        float(os.environ.get("BP_TEE_V2", 0.12)))
+            # [진단] 굽힘 방향이 실제로 원호 평면을 향하는가 — dot(+굽힘 방향,
+            # 목표 평면)×부호 가 +1 이어야 맞다. 사출(2026-08-10 t3) 원인 규명용.
+            st[tag + "_n"] = st.get(tag + "_n", 0) + 1
+            if os.environ.get("BP_SCHED_DBG") == "1" \
+                    and st[tag + "_n"] % int(PHYSICS_HZ) == 0:
+                _w3 = _pl - _xd * float(np.dot(_pl, _xd))
+                _n3 = float(np.linalg.norm(_w3))
+                if _n3 > 1e-9:
+                    _dd = float(np.dot(_bd, _w3 / _n3))
+                    print(f"[sched] {tag} s={sd * 1000:.0f} dot(bd,평면)"
+                          f"={_dd:+.2f} 부호={_sg:+.0f} → 유효꺾임 "
+                          f"{_dd * _sg:+.2f} (want +1) 굽힘{math.degrees(_cb):+.0f}°")
+            if st.get(_zk) != ("ARC", mi):
+                st[_zk] = ("ARC", mi)
+                st[tag + "_st0"] = int(r.get("stuck", 0))   # 증강 기준점
+                print(f"[{r['name']:8s}] 🔒 {tag} 원호#{mi} 진입 — 롤 동결, "
+                      f"굽힘 {math.degrees(_bt):+.0f}° 유지 "
+                      f"(s={sd * 1000:.0f}mm)")
+        r[cr_key], r[cb_key] = _cr, _cb
+        return _cr, _cb
+
+    r["sched_slow"] = 1.0
+    r["sched_open_dir"] = None
+    r["sched_corner"] = False
+    r["sched_arc"] = False
+    r["sched_fold_p"] = None
+    r["sched_tee_p"] = None
+    r["sched_kick_dir"] = None
+    r["sched_xfer_w"] = None
+    # 🎯 크로스바 직진 횡단 (t75 — 코너를 없앴더니 원호가 사라져 접합부
+    #    공동 위에서 T 특수 처리가 안 걸림 → 일반 다리 캡이 무력화돼 끼임.
+    #    닫힘 접합부(코스 끝 −250mm) ±120mm 를 가상 T 구역으로: 소극+저속).
+    if r["name"] == "floor1" and os.environ.get("BP_XING", "1") == "1":
+        _xs = cl.total - 0.250
+        if abs(s1 - _xs) < 0.12:
+            _xi = int(np.argmin(np.abs(cl.s - _xs)))
+            r["sched_tee_p"] = cl.p[_xi]
+            r["sched_tee_mi"] = -1        # 적응 게이트 미해당 (소극만)
+            r["sched_slow"] = min(r["sched_slow"], float(
+                os.environ.get("BP_TEE_V", 0.25)))
+    _crf, _cbf = _drum_cmd(r.get("drum_prim"), r["roll_front"],
+                           r["bend_front"], "cmd_roll", "cmd_bend", 1.0, "앞")
+    _rear_roll = [k for k in r["roll_dof"] if k not in r["roll_front"]]
+    _rear_bend = [k for k in r["bend_dof"] if k not in r["bend_front"]]
+    _crr, _cbr = _drum_cmd(r.get("drum_rear_prim"), _rear_roll, _rear_bend,
+                           "cmd_roll_r", "cmd_bend_r", BP_REAR_SIGN, "뒤")
+    r["bp_f_deg"], r["bp_r_deg"] = math.degrees(_cbf), math.degrees(_cbr)
+    return (r["roll_front"] + r["bend_front"] + _rear_roll + _rear_bend,
+            [_crf] * len(r["roll_front"]) + [_cbf] * len(r["bend_front"])
+            + [_crr] * len(_rear_roll) + [_cbr] * len(_rear_bend))
+
+
+def steer_bp_rollbend(r):
+    """🎯 **정답지 조향** (2026-08-09) — 도면(중심선)으로 롤·굽힘을 몬다.
+
+    목적은 자율주행이 아니라 **"이 몸이 이 코스를 물리적으로 완주하는가"의
+    정답지**다(NAV=blueprint 전용 — 성능 수치를 자율 근거로 쓰지 말 것).
+    🔑 롤기하 프로브가 확정한 사실 위에 선다:
+       · 굽힘 평면은 곡관 평면과 일치한다(어긋남 ±180 = 부호만 음수로)
+       · 정지 원인은 각도 부족 — 필요 90° 에 지령 40°(상한) + 뒤 0°(방치)
+    → 필요 각의 정답을 중심선에서 직접 뽑아 **앞·뒤 관절에 나눠 준다**:
+       앞 굽힘 = (몸통 축 ↔ 앞쪽 접선) 각,  뒤 굽힘 = (뒤쪽 접선 ↔ 몸통 축) 각
+       부호는 각 드럼의 +굽힘 방향에 투영해 정한다(프레임 논쟁 금지 — 실측).
+    """
+    if not r.get("bend_front"):
+        return [], []
+    cl = r["cl"]
+    _mid = r.get("mid_prim")
+    if _mid is None:
+        return [], []
+    _ax = wrot(_mid) @ np.array([1.0, 0.0, 0.0])      # 몸통 축
+    p1 = wpos(r["seg1"])
+    s1, _o, _ = cl.nearest(p1, r.get("s_hint"))
+    lim = math.radians(STEER_RATE) * PHYSICS_DT
+
+    # 관구 접근(복귀)은 라이저 직선 — 굽힘을 편다 (위 EXIT_STRAIGHT_S 주석)
+    if r.get("phase") in ("BACK", "EXIT") and s1 < EXIT_STRAIGHT_S:
+        _cb = r.get("cmd_bend", 0.0)
+        _cbr2 = r.get("cmd_bend_r", 0.0)
+        _cb += max(-lim, min(lim, -_cb))
+        _cbr2 += max(-lim, min(lim, -_cbr2))
+        r["cmd_bend"], r["cmd_bend_r"] = _cb, _cbr2
+        r["bp_f_deg"], r["bp_r_deg"] = math.degrees(_cb), math.degrees(_cbr2)
+        _rb2 = [k for k in r["bend_dof"] if k not in r["bend_front"]]
+        _rr2 = [k for k in r["roll_dof"] if k not in r["roll_front"]]
+        return (r["roll_front"] + r["bend_front"] + _rr2 + _rb2,
+                [r.get("cmd_roll", 0.0)] * len(r["roll_front"])
+                + [_cb] * len(r["bend_front"])
+                + [r.get("cmd_roll_r", 0.0)] * len(_rr2)
+                + [_cbr2] * len(_rb2))
+
+    def _aim(drum, tgt_dir, cr_key, cb_key, sign=1.0, plane_dir=None):
+        """드럼 하나에 (롤, 굽힘) 지령 쌍 — 평면을 돌리고 그 평면에서 꺾는다.
+
+        🚨 초판은 굽힘만 주고 **롤을 아예 안 돌렸다** — 곡관1(수직 평면)에서
+           곡관2/T(수평 평면)로 넘어가는 경계(floor2 s=510 / floor1 s=501)에서
+           두 코스가 똑같이 섰다. 관절은 자유인데 돌리라는 지령이 없었던 것.
+        🔑 카메라 롤 제어에서 오늘 검증한 부품을 그대로 쓴다(표현 선택 +
+           115° 히스테리시스). 입력만 카메라 → 중심선.
+        """
+        _Rd = wrot(drum)
+        _xd = _Rd @ np.array([1.0, 0.0, 0.0])
+        _bd = np.cross(_Rd @ np.array([0.0, 1.0, 0.0]), _xd)
+        # 🎯 **평면과 각도를 분리한다** (2026-08-10 A/I 대조로 확정).
+        #    롤(평면)은 절대 기하(plane_dir = 원호 출구 접선)로 — 도는 디스크
+        #    뒤쫓기(적분 폭주, A/B/G 사출)가 원리적으로 사라진다.
+        #    굽힘(각도)은 look 접선으로 점진 — 출구 접선으로 각도까지 주면
+        #    진입 즉시 60° 만곡을 요구해 입구 턱에 쐐기가 된다(I: 끼임 44회).
+        _pv = plane_dir if plane_dir is not None else tgt_dir
+        _perp = _pv - _ax * float(np.dot(_pv, _ax))
+        _n = float(np.linalg.norm(_perp))
+        ang = math.acos(max(-1.0, min(1.0, abs(float(np.dot(tgt_dir, _ax))))))
+        _cr = r.get(cr_key, 0.0)
+        _cb = r.get(cb_key, 0.0)
+        if _n < 1e-6 or ang < math.radians(2.0):
+            _cb += max(-lim, min(lim, 0.0 - _cb))     # 곧게 편다
+            # 원호 선조준: 직선(펴진 상태)에서만 롤을 목표 평면으로 돌린다 —
+            # H런의 "틀린 평면에 동결" 이 여기서 풀린다(PRE 구간 = 직선).
+            if plane_dir is not None and _n > 1e-6 and \
+                    abs(_cb) <= math.radians(BP_ROLL_LOCK_AT):
+                _perp2 = _perp / _n
+                _e2 = math.atan2(float(np.dot(np.cross(_bd, _perp2), _xd)),
+                                 float(np.dot(_bd, _perp2)))
+                _t2 = _cr + sign * _e2
+                if abs(_t2 - _cr) > math.radians(115.0):
+                    _a2 = _t2 - math.copysign(math.pi, _t2 - _cr)
+                    if abs(_a2 - _cr) < abs(_t2 - _cr):
+                        _t2 = _a2
+                _cr += max(-lim, min(lim, _t2 - _cr))
+            r[cr_key], r[cb_key] = _cr, _cb
+            return _cr, _cb
+        _perp /= _n
+        _err = math.atan2(float(np.dot(np.cross(_bd, _perp), _xd)),
+                          float(np.dot(_bd, _perp)))
+        _tgt_r = _cr + sign * _err
+        _bnd = min(ang, math.radians(BP_BEND_MAX))
+        if abs(_tgt_r - _cr) > math.radians(115.0):   # 반대 표현이 가깝다
+            _alt = _tgt_r - math.copysign(math.pi, _tgt_r - _cr)
+            if abs(_alt - _cr) < abs(_tgt_r - _cr):
+                _tgt_r, _bnd = _alt, -_bnd
+        # 🚨 굽힘이 걸려 있으면 롤을 동결한다 (BP_ROLL_LOCK_AT) — 자유 롤이
+        #    벽 토크로 돌 때 그걸 쫓으면 적분 폭주다. 평면 전환은 펴진 채로.
+        if abs(_cb) > math.radians(BP_ROLL_LOCK_AT):
+            _tgt_r = _cr
+        _cr += max(-lim, min(lim, _tgt_r - _cr))
+        _cb += max(-lim, min(lim, _bnd - _cb))
+        r[cr_key], r[cb_key] = _cr, _cb
+        return _cr, _cb
+
+    # **리딩 끝만 앞(진행 방향)을 본다** — 트레일링 끝은 제 위치의 접선.
+    # 🚨 초판은 앞 디스크가 항상 s+LOOK 을 봤다 — 전진 전용 가정. 복귀(−s)
+    #    에서는 앞이 트레일링인데 **이미 지나온 구간의 접선**으로 꺾인 채
+    #    코너에 박혔다(2026-08-10 실측: 복귀 라이저 하단 s=185 끼임 4회,
+    #    뒤 디스크는 s=62 까지 올라갔는데 앞이 코너에 걸려 휠 122% 헛돎).
+    p0 = wpos(r["seg0"])
+    s0, _o0, _ = cl.nearest(p0, r.get("s_hint"))
+    if r.get("dir", 1) > 0:            # 전진: 앞이 리딩
+        jf = int(np.argmin(np.abs(cl.s - (s1 + STEER_LOOK))))
+        jr = int(np.argmin(np.abs(cl.s - s0)))
+    else:                              # 복귀: 뒤가 리딩
+        jf = int(np.argmin(np.abs(cl.s - s1)))
+        jr = int(np.argmin(np.abs(cl.s - (s0 - STEER_LOOK))))
+    # 원호 구간(+PRE)에서는 리딩 목표를 **원호 출구 접선**으로 (위 BP_ARC 주석)
+    arcs = r.get("cl_arcs")
+    if arcs is None:
+        arcs = r["cl_arcs"] = _cl_arcs(cl)
+        print(f"  {r['name']}: 원호 구간 "
+              f"{[(round(a * 1000), round(b * 1000)) for a, b, _x, _y in arcs]}"
+              f"mm (출구 조준 대상)")
+    _pl_f = _pl_r = None                  # 원호 평면 목표(출구 접선) — 롤 전용
+    if BP_ARC_AIM:                        # 기본 꺼짐 — 위 BP_ARC_AIM 주석
+        for _a0, _a1, _ia, _ib in arcs:
+            if r.get("dir", 1) > 0 and _a0 - BP_ARC_PRE <= s1 <= _a1:
+                _pl_f = cl.tangent(min(_ib + 2, len(cl.s) - 1))
+                break
+            if r.get("dir", 1) < 0 and _a0 <= s1 <= _a1 + BP_ARC_PRE:
+                _pl_r = cl.tangent(max(_ia - 2, 0))
+                break
+    tf = cl.tangent(jf)
+    if float(np.dot(tf, _ax)) < 0.0:
+        tf = -tf
+    tr = cl.tangent(jr)
+    if float(np.dot(tr, _ax)) < 0.0:
+        tr = -tr
+    if _pl_f is not None and float(np.dot(_pl_f, _ax)) < 0.0:
+        _pl_f = -_pl_f
+    if _pl_r is not None and float(np.dot(_pl_r, _ax)) < 0.0:
+        _pl_r = -_pl_r
+    _crf = _cbf = _crr = _cbr = 0.0
+    if r.get("drum_prim") is not None:
+        _crf, _cbf = _aim(r["drum_prim"], tf, "cmd_roll", "cmd_bend",
+                          plane_dir=_pl_f)
+    if r.get("drum_rear_prim") is not None:
+        _crr, _cbr = _aim(r["drum_rear_prim"], tr, "cmd_roll_r", "cmd_bend_r",
+                          sign=BP_REAR_SIGN, plane_dir=_pl_r)
+    r["bp_f_deg"], r["bp_r_deg"] = math.degrees(_cbf), math.degrees(_cbr)
+    _rear_bend = [k for k in r["bend_dof"] if k not in r["bend_front"]]
+    _rear_roll = [k for k in r["roll_dof"] if k not in r["roll_front"]]
+    return (r["roll_front"] + r["bend_front"] + _rear_roll + _rear_bend,
+            [_crf] * len(r["roll_front"]) + [_cbf] * len(r["bend_front"])
+            + [_crr] * len(_rear_roll) + [_cbr] * len(_rear_bend))
+
+
+def steer_rollbend(r):
+    """**롤로 겨누고 굽힘 한 축으로 꺾는다** (v9 구조, 2026-08-09 신설).
+
+    🔑 컨트롤러가 주는 것은 `(세기 mag, 화소 방위 clock)` 하나다. 지금까지는
+       그것을 피치·요 두 축에 sin/cos 로 **배분**했는데, 비틀림이 잠긴 몸에서는
+       배분식이 자세에 따라 요동쳐 관절이 좌우로 왕복했다(브레이크 댄스).
+       v9 는 롤이 **자유회전**이라 평면 자체를 돌릴 수 있다 →
+           롤 목표 = 방위,  굽힘 목표 = 세기
+       방향과 크기가 분리되어 배분이 사라진다.
+    🚨 **뒤 굽힘은 건드리지 않는다.** 단독 실측에서 앞만 꺾은 것이 최고였다
+       (앞만 +126mm / 앞뒤 반대부호 C자 +123 / 같은 부호 S자 +16mm).
+       뒤는 자유롭게 두면 벽이 알아서 맞춰 준다.
+    🚨 **굽힘 부호는 음수가 "위"다** — 굽힘축이 Y 라 오른손 법칙으로 양수가
+       아래다(단독 시험에서 +37 을 줘 머리를 바닥에 처박은 실측).
+    """
+    if not r.get("bend_front"):
+        return [], []
+    q = np.asarray(r["art"].get_joint_positions())
+    mag, clock = r.get("ctl_steer", (0.0, 0.0))
+    _c = r.get("cond")
+    # 직진 장면에서는 편다 — v1_1 의 완화 규약과 같다.
+    # 🚨 **완화 조건에서 분기비율 항을 뺀다** (2026-08-09). v1_1 은 "분기비율
+    #    <8% 이고 입사각<12°" 를 요구하는데, 실전 맵은 분기 신호가 5~60% 로 늘
+    #    떠 있어 **완화가 거의 성립하지 않는다** — 한 번 접힌 몸이 안 펴진다
+    #    (사용자 GUI 지적: *"다시 수평을 유지하지 않으니 방향을 못 잡는다"*).
+    #    조향 세기(mag)가 이미 입사각에서 나온 값이므로 그것만 보면 충분하다.
+    if (r.get("straighten_n", 0) > 0
+            or r.get("ctl_state") == "RECOVER"
+            or mag <= 0.0):
+        _lim = math.radians(RELAX_RATE) * PHYSICS_DT
+        idx = r["bend_front"]
+        # 누적 지령도 같이 0 으로 되감는다 — 안 그러면 완화가 끝난 첫 프레임에
+        # 묵은 지령이 튀어 다시 접힌다(v1_1 에서 겪은 그대로).
+        for _k in ("cmd_bend",):
+            _v = r.get(_k, 0.0)
+            r[_k] = _v - max(-_lim, min(_lim, _v))
+        return (idx, [float(q[k]) - max(-_lim, min(_lim, float(q[k])))
+                      for k in idx])
+    # 🎯 **롤은 측정으로 몬다** (2026-08-09 사용자 지적으로 재작성).
+    # 🚨 한때 롤 목표를 `방위 + 180°` 라는 **절대 각도**로 열어 놓고 줬다.
+    #    롤 관절은 한계가 없어(자유회전) 관절 0점과 화소 방위 0점이 서로
+    #    무관하다 — 기준점이 없으니 어디까지 감길지 아무도 모른다. 실측:
+    #    **롤이 +190° 까지 감겨** 몸이 통째로 뒤집혔다(꺾임 194.5°).
+    # 🔑 조원 스크립트가 같은 이유로 **드럼의 실제 월드 자세**를 읽어 쓴다 —
+    #    *"굽힘 평면의 절대 방위가 우리가 정말 원하는 것"*. 우리도 같은 것을
+    #    가지고 있다: 카메라 프림의 월드 자세(오른손 법칙 계산에 이미 쓴다).
+    #    · 드럼 X·Y 축 → **양(+)의 굽힘이 앞 디스크를 보내는 월드 방향**
+    #    · 카메라 자세 + 개구 화소 방위 → **가고 싶은 월드 방향**
+    #    · 둘 사이의 각을 관 축 둘레로 재서 그만큼만 롤을 돌린다
+    #    열린 루프가 아니라 오차를 줄이는 것이라 감길 일이 없다.
+    _drum = r.get("drum_prim")
+    _camp = r.get("cam_prim")
+    _roll_err = None
+    if _drum is not None and _camp is not None:
+        _Rd = wrot(_drum)                       # 열이 기저
+        _xd = _Rd @ np.array([1.0, 0.0, 0.0])
+        _yd = _Rd @ np.array([0.0, 1.0, 0.0])
+        _bend_dir = np.cross(_yd, _xd)          # +굽힘이 디스크를 보내는 방향
+        _n = float(np.linalg.norm(_bend_dir))
+        _Rc = wrot(_camp)
+        _img_r = _Rc @ np.array([1.0, 0.0, 0.0])
+        _img_d = _Rc @ np.array([0.0, -1.0, 0.0])
+        _th = math.radians(clock)
+        _want_dir = math.cos(_th) * _img_r + math.sin(_th) * _img_d
+        _wn = float(np.linalg.norm(_want_dir))
+        if _n > 1e-6 and _wn > 1e-6:
+            _bend_dir /= _n
+            _want_dir /= _wn
+            # 관 축(_xd) 둘레의 부호 있는 각 — 이만큼 롤을 돌리면 평면이 맞는다
+            _roll_err = math.atan2(
+                float(np.dot(np.cross(_bend_dir, _want_dir), _xd)),
+                float(np.dot(_bend_dir, _want_dir)))
+    if _roll_err is None:                       # 측정 불가 — 롤을 안 건드린다
+        _roll_err = 0.0
+    r["roll_err_deg"] = math.degrees(_roll_err)
+    # 🔬 보정 시험 (ROLL_CAL=도) — 롤을 **고정 각도**로 돌려 놓고 측정 오차가
+    #    그만큼 따라 변하는지 본다. 측정식의 부호·배율을 이론 없이 실측으로
+    #    확정하는 유일한 방법(부호 이론 논쟁 금지 규칙).
+    if ROLL_CAL is not None:
+        return (r["roll_front"], [math.radians(ROLL_CAL)] * len(r["roll_front"]))
+    # 🚨 **부호는 실측으로 가른다** (기록된 규칙). 보정 시험(ROLL_CAL 스윕):
+    #    롤 0→39→80° 에 오차 −127→−157→+134° — 롤+ 가 오차− 를 만든다.
+    #    이득이 1:1 이 아닌 것(≈0.77)은 카메라가 앞 디스크에 붙어 롤과 같이
+    #    돌기 때문(측정 일부 상쇄) — 방향은 유지되므로 적분이 수렴한다.
+    # 🚨 **±180° 클램프 철회** (궤적 실측: 클램프에 박혀 오차 +63~107° 가
+    #    전 구간 안 닫혔다). 조원 스크립트 머리말의 처방을 그대로 쓴다 —
+    #    *"(롤, +굽힘) 과 (롤±180°, −굽힘) 은 같은 평면이다. 지금 지령에
+    #    가까운 표현을 골라라."* 목표가 90° 넘게 멀면 롤을 180° 당기고 굽힘
+    #    부호를 뒤집는다. 클램프가 필요 없어진다.
+    # 🚨 이 함수는 **편집이 세 겹 쌓여** 새 계산이 옛 줄에 덮이는 사고가
+    #    있었다(_cr 리셋 → 옛 적분기 실행). 지령 계산부는 이 블록 하나다 —
+    #    덧대지 말고 여기를 고칠 것.
+    _bend = -math.radians(min(mag, STEER_MAX_V9))     # 음수 = 위
+    lim = math.radians(STEER_RATE) * PHYSICS_DT
+    _cr = r.get("cmd_roll", 0.0)
+    _cb = r.get("cmd_bend", 0.0)
+    # ── 🎯 **역할 분리** (2026-08-09 확정 — 실측 역설이 근거) ──────────
+    # 🚨 조향 결함 6개를 다 고쳐 롤·굽힘이 일관되게 작동하자 **오히려
+    #    나빠졌다**(조향 없음 s=601 / 조향 정상작동 s=264). 버그가 아니라
+    #    전략이 틀렸던 것: 곡관에서 카메라는 반쯤 장님(관경 18~34mm)이라
+    #    그 신호로 롤을 조준해 관절 하나에 세게 주면, 틀리는 순간 96mm
+    #    강체가 통째로 벽에 박힌다.
+    # 🔑 단독 실측이 역할을 이미 갈라 줬다:
+    #      곡관: 앞 굽힘만 + 밀기 → +126mm ✅  (롤 조준 불필요)
+    #      T   : 롤 조준 + 굽힘   → 전 방향 ✅ (조준이 핵심)
+    #    조원 스크립트가 분기 전용이고 곡관 조향이 없는 것도 같은 설계다.
+    #      · 곡관·직관 → 롤 **유지**, 지금 평면에 투영해 굽힘 **부호만** 고른다
+    #      · BRANCH/T  → 롤 조준 전체(측정+표현선택+히스테리시스+잠금)
+    _bend = -math.radians(min(mag, STEER_MAX_V9))     # 음수 = 위(관례)
+    lim = math.radians(STEER_RATE) * PHYSICS_DT
+    _cr = r.get("cmd_roll", 0.0)
+    _cb = r.get("cmd_bend", 0.0)
+    _aim = (r.get("ctl_state") == "BRANCH_ENTRY"
+            or (_c is not None and _c.state == "BRANCH"))
+    if not _aim:
+        # 곡관·직관 — 개구가 지금 굽힘 평면의 어느 쪽인지만 본다.
+        # |오차|<90° 면 +굽힘 쪽, 아니면 −굽힘 쪽. 롤은 안 돌린다.
+        _bnd = (+1.0 if abs(_roll_err) < math.pi / 2.0 else -1.0)             * math.radians(min(mag, STEER_MAX_V9))
+        _cb += max(-lim, min(lim, _bnd - _cb))
+        r["cmd_bend"] = _cb
+        r["roll_tgt_deg"] = math.degrees(_cr)
+        r["steer_err"] = mag
+        r["steer_max"] = max(r.get("steer_max", 0.0), mag)
+        return (r["bend_front"], [_cb] * len(r["bend_front"]))
+    # ── T 분기 — 롤 조준 (측정 + 표현 선택 + 히스테리시스 + 잠금) ────
+    # 굽힘 부호 반영: 측정은 +굽힘 방향 기준, 기본 지령은 음수(위)라
+    # 정렬 상태가 +180° 로 찍힌다 — 조원이 롤·굽힘을 한 쌍으로 두는 이유.
+    _e = _roll_err
+    if _bend < 0.0:
+        _e = ((_e - math.pi) + math.pi) % (2.0 * math.pi) - math.pi
+    _tgt = _cr + ROLL_SIGN * _e
+    _bnd = _bend
+    if abs(_tgt - _cr) > math.radians(115.0):    # 경계 여유 (조원 값)
+        _alt = _tgt - math.copysign(math.pi, _tgt - _cr)
+        if abs(_alt - _cr) < abs(_tgt - _cr):
+            _tgt, _bnd = _alt, -_bnd
+    r["roll_tgt_deg"] = math.degrees(_tgt)
+    _bent = abs(math.degrees(float(np.sum(q[r["bend_front"]]))))         > ROLL_LOCK_AT_V9
+    if not _bent:                                # 꺾인 몸으로 롤 금지
+        _cr += max(-lim, min(lim, _tgt - _cr))
+    _cb += max(-lim, min(lim, _bnd - _cb))
+    r["cmd_roll"], r["cmd_bend"] = _cr, _cb
+    r["steer_err"] = mag
+    r["steer_max"] = max(r.get("steer_max", 0.0), mag)
+    return (r["roll_front"] + r["bend_front"],
+            [_cr] * len(r["roll_front"]) + [_cb] * len(r["bend_front"]))
 
 
 def steer_vision(r):
@@ -2026,7 +3565,8 @@ step, was_playing = 0, True
 # 🎯 FAIL_S 10→5s (2026-08-07 사용자 지시: *"끼였으면 그 자체로 이미 문제.
 #    기다리지 말고 짧게 끊어야 다음 테스트로 개선한다"*). 하한은 의도된
 #    정지 구간(출발 HOLD ~3s, 진입 확인 1.5s)보다는 길어야 오탐이 없다.
-STUCK_S, REPORT_S = 2.0, 3.0
+STUCK_S = 2.0
+REPORT_S = float(os.environ.get("REPORT_S", 3.0))   # 진단 때 1s 로 좁힌다
 FAIL_S = float(os.environ.get("FAIL_S", 5.0))
 # 🎯 **순진행 워치독** (2026-08-09 사용자 지시: *"끼이거나 문제가 생겨서 위치
 #    변화가 없으면 타임아웃으로 끊어라 — 움직이지도 않는 것을 계속 붙잡고 있어
@@ -2106,6 +3646,39 @@ while True:
         s_now, off_now, i_now = r["cl"].nearest(p1, r.get("s_hint"))
         r["s_hint"] = s_now
 
+        # 🔬 롤 기하 프로브 (ROLL_GEO=1, 2026-08-09) — s=342 곡관 정지의 유력
+        #    후보("동결된 롤 방위가 곡관 평면과 안 맞는다")를 가르는 계측.
+        #    기준은 **중심선(심판 전용)** — 곡관 평면의 정답은 맵이 안다.
+        #      +굽힘 방향(드럼 실측) vs 앞쪽 접선의 수직 성분(필요 방향)
+        #      어긋남 0°/±180° = 평면 일치(부호로 해결 가능) / ±90° = 수직(최악)
+        if os.environ.get("ROLL_GEO") == "1"                 and r.get("drum_prim") is not None                 and r["t"] % int(PHYSICS_HZ) == 0:
+            _Rd = wrot(r["drum_prim"])
+            _xd = _Rd @ np.array([1.0, 0.0, 0.0])
+            _bd = np.cross(_Rd @ np.array([0.0, 1.0, 0.0]), _xd)
+            _s1p, _o1p, _ = r["cl"].nearest(wpos(r["seg1"]), r.get("s_hint"))
+            _jp = int(np.argmin(np.abs(r["cl"].s - (_s1p + 0.10))))
+            _tgp = r["cl"].tangent(_jp)
+            _need = _tgp - _xd * float(np.dot(_tgp, _xd))
+            _nn = float(np.linalg.norm(_need))
+            if _nn > 1e-6:
+                _need = _need / _nn
+                _ang = math.degrees(math.atan2(
+                    float(np.dot(np.cross(_bd, _need), _xd)),
+                    float(np.dot(_bd, _need))))
+                print(f"           [롤기하] s={_s1p * 1000:4.0f} "
+                      f"+굽힘→({_bd[0]:+.2f},{_bd[1]:+.2f},{_bd[2]:+.2f}) "
+                      f"필요→({_need[0]:+.2f},{_need[1]:+.2f},{_need[2]:+.2f}) "
+                      f"어긋남 {_ang:+4.0f}°  굽힘지령 "
+                      f"{math.degrees(r.get('cmd_bend', 0.0)):+.0f}°")
+        # 🔬 카메라 부착 프로브 (CAM_PROBE=1, 2026-08-09 사용자 관찰 검증):
+        #    카메라가 링크를 실제로 따라다니는지 — 월드 좌표 간격을 직접 잰다.
+        if os.environ.get("CAM_PROBE") == "1" and r.get("cam_prim") is not None                 and r["t"] % int(PHYSICS_HZ) == 0:
+            _cp = wpos(r["cam_prim"])
+            _dp = wpos(r["seg1"])
+            print(f"           [캠프로브] 카메라({_cp[0]*1000:+.0f},"
+                  f"{_cp[1]*1000:+.0f},{_cp[2]*1000:+.0f}) 앞디스크"
+                  f"({_dp[0]*1000:+.0f},{_dp[1]*1000:+.0f},{_dp[2]*1000:+.0f}) "
+                  f"간격 {float(np.linalg.norm(_cp-_dp))*1000:.1f}mm")
         if r["state"] == "SETTLE":
             # 🚨 안착 중에도 예압을 **매 스텝 다시 써야** 한다 — reset 뒤의
             #    `set_joint_positions()` 가 드라이브 타깃을 지웠기 때문이다.
@@ -2136,6 +3709,14 @@ while True:
                 _el = r["fr"] @ (wrot(r["seg0"]).T @ _tg)
                 print(f"[{r['name']:8s}] 안착 s={s_now * 1000:.1f}mm "
                       f"이탈 {off_now * 1000:.1f}mm — 주행 시작")
+                # 🎯 **탈출 전용 신속 시험** (2026-08-10): 안착 즉시 복귀
+                #    국면으로 — 왕복 15분을 기다리지 않고 라이저 탈출만
+                #    3분 내로 반복한다. `EXIT_TEST=1` 로 켠다.
+                if os.environ.get("EXIT_TEST", "0") == "1":
+                    r["phase"] = "BACK"
+                    r["dir"] = -1
+                    print(f"[{r['name']:8s}] 🧪 EXIT_TEST — 안착 즉시 복귀 "
+                          f"국면(라이저 탈출만 시험)")
                 print(f"           [진단] 헤딩({_hd[0]:+.2f},{_hd[1]:+.2f},"
                       f"{_hd[2]:+.2f}) 접선({_tg[0]:+.2f},{_tg[1]:+.2f},"
                       f"{_tg[2]:+.2f}) 로컬목표({_el[0]:+.2f},{_el[1]:+.2f},"
@@ -2297,8 +3878,69 @@ while True:
             _pi, _pv = [], []
         else:
             _pi, _pv = center_legs(r) if CENTER_ON else preload_legs(r)
-        _si, _sv = (steer(r, i_now) if NAV == "blueprint"
-                    else steer_vision(r) if NAV == "vision"
+        # 🎯 **되감기 테이프** (2026-08-10 밤 — 사용자 설계: 나가는 턴의
+        #    관절 궤적을 위치 기준으로 기록해 두고, 복귀는 오른팔 스텁에서
+        #    후진하며 같은 위치에 같은 관절값을 재생한다. 준정적 기동이라
+        #    "위치→모양" 은 방향 무관 — 미러 계산 불필요, 시간만 역재생.)
+        _tape = os.environ.get("BP_TAPE")
+        if _tape and r["name"] == "floor1":
+            _sh12 = float(r.get("s_hint") or 0.0)
+            if os.environ.get("BP_TAPE_REC") == "1" and r["dir"] > 0 \
+                    and r.get("phase", "OUT") == "OUT" \
+                    and 0.40 <= _sh12 <= 1.00:
+                if "tape_fh" not in r:
+                    r["tape_fh"] = open(_tape, "w")
+                r["tape_fh"].write(
+                    f"{_sh12:.4f} {r.get('cmd_roll', 0.0):.4f} "
+                    f"{r.get('cmd_bend', 0.0):.4f} "
+                    f"{r.get('cmd_roll_r', 0.0):.4f} "
+                    f"{r.get('cmd_bend_r', 0.0):.4f}\n")
+            elif os.environ.get("BP_TAPE_REC") != "1" \
+                    and r.get("phase") == "BACK" and 0.40 <= _sh12 <= 1.00:
+                if "tape_arr" not in r:
+                    try:
+                        _rows = np.loadtxt(_tape)
+                        r["tape_arr"] = _rows[np.argsort(_rows[:, 0])]
+                        print(f"[{r['name']:8s}] 🎞 되감기 테이프 로드 — "
+                              f"{len(r['tape_arr'])}행")
+                    except Exception as _e12:
+                        r["tape_arr"] = None
+                        print(f"[경고] 테이프 로드 실패: {_e12}")
+                if r.get("tape_arr") is not None:
+                    _ta = r["tape_arr"]
+                    _i12 = int(np.searchsorted(_ta[:, 0], _sh12))
+                    _i12 = max(0, min(len(_ta) - 1, _i12))
+                    _row = _ta[_i12]
+                    r["cmd_roll"], r["cmd_bend"] = float(_row[1]), float(_row[2])
+                    r["cmd_roll_r"], r["cmd_bend_r"] = (float(_row[3]),
+                                                        float(_row[4]))
+                    _rb12 = [k for k in r["bend_dof"]
+                             if k not in r["bend_front"]]
+                    _rr12 = [k for k in r["roll_dof"]
+                             if k not in r["roll_front"]]
+                    _si = (r["roll_front"] + r["bend_front"] + _rr12 + _rb12)
+                    _sv = ([float(_row[1])] * len(r["roll_front"])
+                           + [float(_row[2])] * len(r["bend_front"])
+                           + [float(_row[3])] * len(_rr12)
+                           + [float(_row[4])] * len(_rb12))
+                    r["tape_boost"] = True   # 되감기 견인 증강 (t91: s=678
+                    #   바퀴 99% 헛돎 = 견인 한계 — 사용자: "힘만 더")
+                    if LEG_FORCE:
+                        _fi, _fv = force_legs(r)
+                        if _fi:
+                            _set_eff(r, _fv, _fi)
+                    r["tape_boost"] = False
+                    _set_pos(r, _sv, _si)
+                    _v12 = TARGET_SPEED_MPS * 0.45
+                    drive(r, math.degrees(_v12 / WHEEL_R) * r["dir"])
+                    r["wheel_rad"] += (_v12 / WHEEL_R) * PHYSICS_DT
+                    r["off_hist"] = r.get("off_hist", []) + [off_now]
+                    continue
+        _si, _sv = (((steer_bp_sched(r) if BP_SCHED else steer_bp_rollbend(r))
+                     if r.get("bend_front")
+                     else steer(r, i_now)) if NAV == "blueprint"
+                    else (steer_rollbend(r) if r.get("bend_front")
+                          else steer_vision(r)) if NAV == "vision"
                     else steer_onboard(r))
         if _pi or _si:
             _set_pos(r, _pv + _sv, _pi + _si)
@@ -2316,18 +3958,50 @@ while True:
             _v = r["v_cmd"]                      # ← `driver/control` 이 정한다
         elif AUTO_SPEED:
             curve_speed(r)                       # r["curve_f"] 갱신
-            _f = min(r.get("curve_f", 1.0), leg_speed(r))
+            _f = min(r.get("curve_f", 1.0), leg_speed(r),
+                     r.get("sched_slow", 1.0))   # 스케줄 조준 미완 감속
+            # 🎯 코너 모드는 감속 면제 (t13 — 정적 평형은 관성으로 돌파한다.
+            #    v9 의 T 통과는 75mm/s 풀속도였고, 우리는 곡관 감속이 45→20
+            #    mm/s 로 깎아 정적으로 밀다 쐐기가 됐다).
+            if r.get("sched_corner"):
+                _f = max(_f, float(os.environ.get("BP_CORNER_F", 1.0)))
             r["want_f"] = _f
             _v = ramp(r, TARGET_SPEED_MPS * _f)
         else:
             _v = TARGET_SPEED_MPS
+        if r.get("unjam_s0") is not None:
+            _v *= 0.5                     # 되물림은 반속 — 사출 방지
+        # 탈출 마지막 구간은 저속 — 휠 감쇠가 토크를 다 먹는다 (EXIT_V 주석)
+        # 🚨 위치(관구 220mm 이내)로 걸면 **출발부터** 걸려 등반 추력이 모자라
+        #    미끄러진다(GUI 실측: 185→211 후퇴 후 왕복). 접힌 다리가 실제로
+        #    생긴 순간(= 토크 기근 구간의 시작)부터만 건다.
+        if r.get("exit_folded") or r.get("exit_cavity"):
+            _v = min(_v, EXIT_V)
         drive(r, math.degrees(_v / WHEEL_R) * r["dir"])
         r["wheel_rad"] += (_v / WHEEL_R) * PHYSICS_DT
         r["off_hist"] = r.get("off_hist", []) + [off_now]
 
         # 🚨 관 밖으로 튄 것은 되살리지 않는다 — 조용히 계속 돌면 로그가
         #    거짓말이 된다. 그 로봇만 멈추고 나머지는 계속 간다.
-        if off_now > PIPE_IR + 0.03 or not np.isfinite(p1).all():
+        # ⚠ 탈출 단계(EXIT)는 면제 — 관 밖에서는 중심선 끝점과의 거리가
+        #    탈출 거리만큼 커지는 게 **정상**이다(끝점 클램프). 면제하지
+        #    않으면 +80mm 시점에 이 감시가 탈출 성공보다 먼저 죽인다.
+        # ⚠ **원호 구간은 한계를 넓힌다** (2026-08-10 저녁 — t5 기하 계산).
+        #    각진 T 의 채점 중심선은 R162 필렛 **모델**이다. 물리적으로 옳은
+        #    코너링(정면 벽 x=780 까지 파고든 뒤 선회 — v9 통과 기전)은 그
+        #    필렛에서 최대 ~100mm 떨어진다(원호 중심 (568,688)→벽 (775,850)
+        #    = 263mm − R162 = 101mm). 80mm 일괄 한계가 **옳은 통과를 매번
+        #    s=638 에서 죽이고 있었다** — 어제 A~J 트라이얼의 사망 지점 전부.
+        #    직선 구간은 그대로 80mm — 진짜 사출은 여전히 즉사한다.
+        _off_lim = PIPE_IR + 0.03
+        if NAV == "blueprint" and BP_SCHED:
+            for _m4 in r.get("cl_arc_meta") or []:
+                if _m4["s0"] - 0.05 <= s_now <= _m4["s1"] + 0.05:
+                    _off_lim = PIPE_IR + float(
+                        os.environ.get("BP_CORNER_OFF", 0.08))
+                    break
+        if r.get("phase") != "EXIT" and (
+                off_now > _off_lim or not np.isfinite(p1).all()):
             print(f"[{r['name']:8s}] ❌ 코스 이탈 — 중심선에서 "
                   f"{off_now * 1000:.0f}mm. 이 로봇은 여기서 멈춘다")
             drive(r, 0.0)
@@ -2409,15 +4083,82 @@ while True:
                 continue
             continue
 
+        # ── 완전 탈출 단계 — s 는 관 밖에서 0 에 클램프되므로 월드 변위로 잰다
+        if r.get("phase") == "EXIT":
+            _d = float(np.linalg.norm(wpos(r["seg1"]) - r["exit_p0"]))
+            if _d >= EXIT_EXTRA:
+                print(f"[{r['name']:8s}] ✅ **임무 완료** — 몸 전체가 배수구 "
+                      f"관 밖으로 탈출 (관구 밖 +{_d * 1000:.0f}mm)")
+                r["lap"] = 1
+                drive(r, 0.0)
+                r["dead"] = True
+            elif step - r["mark"] > 20.0 * PHYSICS_HZ:
+                # 탈출 단계는 s 기반 끼임 판정이 안 통한다 — 자체 시한을 둔다
+                print(f"[{r['name']:8s}] ⚠ 탈출 정체 — 관구 밖 "
+                      f"{_d * 1000:.0f}/{EXIT_EXTRA * 1000:.0f}mm 에서 "
+                      f"20초 무진행. 실패로 판정")
+                drive(r, 0.0)
+                r["dead"] = True
+            continue
+
+        # 🎯 **T 3점턴** (2026-08-10 밤, t57 확정 — 복귀 T 는 정면이 열린
+        #    관이라 몸을 세워줄 벽이 없다: 끼임이 안 나니 되물림 스윙도 안
+        #    나고 미끄러져 지나가다 심판에 죽는다). 이탈이 문턱을 넘으면
+        #    = 입구를 지나치기 시작 → 굽힘 유지한 채 의도적 후진 스윙을
+        #    발동한다(트레일러 후진). 전진 복귀는 기존 UNJAM_M 복원이 맡는다.
+        if (r.get("sched_tee_p") is not None and r.get("unjam_s0") is None
+                and r["dir"] > 0
+                and off_now > float(os.environ.get("BP_TEE_SWING", 0.060))):
+            r["stuck"] += 1
+            r["dir"] = -1
+            r["unjam_s0"] = s_now
+            sync_rollbend_cmds(r)
+            r["s_last"], r["mark"] = s_now, step
+            r["off_at_mark"] = off_now
+            print(f"[{r['name']:8s}] ↪ T 3점턴 — 이탈 {off_now * 1000:.0f}mm, "
+                  f"굽힘 유지 후진 스윙 (s={s_now * 1000:.0f}mm)")
+            continue
+
         # 진행 방향 기준으로 나아갔는가
         adv = (s_now - r["s_last"]) * r["dir"]
         if adv > 0.003:
             r["s_last"], r["mark"] = s_now, step
-        elif step - r["mark"] > STUCK_S * PHYSICS_HZ:
+            r["off_at_mark"] = off_now
+            # 🎯 끼임 탈출 물러남이 UNJAM_M 에 닿으면 **임무 방향으로 복원**
+            #    (2026-08-10). 복원이 없으면 복귀 중 끼임 한 번에 코스를 한
+            #    바퀴 더 돈다 — GUI 런 실측(라이저 끼임 → 2바퀴째).
+            if r.get("unjam_s0") is not None and \
+                    abs(s_now - r["unjam_s0"]) >= UNJAM_M:
+                r["unjam_s0"] = None
+                r["dir"] = -1 if r.get("phase") == "BACK" else 1
+                sync_rollbend_cmds(r)     # 지령 적분기 ← 실측 (사출 방지)
+                r["s_last"], r["mark"] = s_now, step
+                print(f"[{r['name']:8s}] ↩ 끼임 탈출 물러남 "
+                      f"{UNJAM_M * 1000:.0f}mm 완료 — 임무 방향 복원 "
+                      f"({'복귀' if r['dir'] < 0 else '전진'}, "
+                      f"s={s_now * 1000:.0f}mm)")
+        elif step - r["mark"] > (float(os.environ.get("STUCK_ARC_S", 8.0))
+                                 if r.get("sched_arc") else STUCK_S) \
+                * PHYSICS_HZ:
+            # 🎯 원호(접합부) 안은 인내 8초 — 공동 교량 통과(머리가 건너편
+            #    팔 벽에 닿을 때까지 미는 것)는 3초보다 길다 (2026-08-10 t20).
+            # 🎯 **코너 선회는 s 로 안 보인다** (2026-08-10 t10 실측). 각진 T
+            #    선회는 회전 운동이라 최근접 s 가 제자리(638)인데, 이탈은
+            #    84.8→57mm 로 끼임 34회에 걸쳐 꾸준히 줄었다 — 로봇은 돌고
+            #    있었고 워치독이 3초마다 후진시켜 진행을 되돌린 것.
+            #    코너 모드 중 이탈이 2mm+ 줄었으면 진행으로 인정하고 참는다.
+            if r.get("sched_corner") and \
+                    off_now < r.get("off_at_mark", 1.0) - 0.002:
+                r["mark"] = step
+                r["off_at_mark"] = off_now
+                continue
             # 끼임 → **방향을 뒤집어 빠져나온다** (임무 규칙 8 의 연습장판)
             r["stuck"] += 1
             r["dir"] *= -1
+            r["unjam_s0"] = s_now        # 물러남 시작점 — UNJAM_M 뒤 복원
+            sync_rollbend_cmds(r)        # 지령 적분기 ← 실측 (사출 방지)
             r["s_last"], r["mark"] = s_now, step
+            r["off_at_mark"] = off_now
             print(f"[{r['name']:8s}] ⚠ 끼임 {r['stuck']}회 "
                   f"(s={s_now * 1000:.0f}mm, 이탈 {off_now * 1000:.1f}mm) "
                   f"→ 방향 전환 {'전진' if r['dir'] > 0 else '후진'}")
@@ -2425,7 +4166,7 @@ while True:
                 diag_stuck(r)
             continue
 
-        # 코스 끝에 닿으면 복귀, 출발점으로 돌아오면 **임무 종료**.
+        # 코스 끝에 닿으면 복귀, **몸 전체가 배수구 밖으로 나오면** 임무 종료.
         # 🎯 **왕복 반복은 폐지했다** (2026-08-09 사용자 확정: *"이제 왕복
         #    필요없어. 실전으로 반영하는 단계야"*). 무한 왕복은 연습장에서
         #    짧은 구간을 되풀이해 보려던 규약이고, 실전 임무는 **편도 주행 +
@@ -2434,18 +4175,30 @@ while True:
         #    절반이 관 밖으로 나가고, 벽을 잃은 다리가 스트로크 한계까지 뻗어
         #    **관 밖으로 튀어나온다**(GUI 로 확인).
         #    → 출발과 같은 여유(END_S)를 남기고 되돌아간다.
-        if r["dir"] > 0 and s_now >= r["cl"].total - END_S:
+        # 🎯 종점은 출발 인덱스(i0)가 아니라 **관 밖**이다 (2026-08-10 사용자:
+        #    *"완전히 튀어나와서 몸 전체가 배수구 관 밖으로"*. i0 는 라이저
+        #    한가운데라 "끝지점까지만 가고 말았"다) — 방향 뒤집기 오판을
+        #    막기 위해 phase(OUT/BACK/EXIT)로 임무 국면을 따로 든다.
+        if r.get("phase", "OUT") == "OUT" and r["dir"] > 0 \
+                and s_now >= r["cl"].total - END_S:
+            # 🎯 **역재생 귀가 스냅** (floor1) — 코스 끝 = 오른팔 스텁.
+            #    후진 복귀는 코스를 되밟는 것이 아니라 **나가는 가지 s 로
+            #    갈아타** 원길(T 역통과→본관→라이저)을 되밟아야 한다.
+            #    같은 물리 지점의 나가는 branch s(≈850mm 부근)로 스냅.
+            # floor1: 스냅 없이 **코스 후진 그대로** — 루프를 되밟아 오른팔로
+            # 후진 접근한 뒤, s∈[400,1000] 에서 테이프 되감기가 이어받는다.
+            r["phase"] = "BACK"
             r["dir"] = -1
+            r["unjam_s0"] = None
             r["s_last"], r["mark"] = s_now, step
             print(f"[{r['name']:8s}] ✅ 코스 끝 도달 — 복귀 시작")
-        elif r["dir"] < 0 and i_now <= r["i0"]:
-            r["lap"] = 1
+        elif r.get("phase") == "BACK" and r["dir"] < 0 and s_now <= EXIT_S:
+            r["phase"] = "EXIT"
+            r["exit_p0"] = wpos(r["seg1"]).copy()
             r["s_last"], r["mark"] = s_now, step
-            print(f"[{r['name']:8s}] ✅ **임무 완료** — 출발점 복귀 "
-                  f"(s={s_now * 1000:.0f}mm)")
-            drive(r, 0.0)
-            r["dead"] = True
-            continue
+            print(f"[{r['name']:8s}] 🚪 배수구 관구 도달"
+                  f"(s={s_now * 1000:.0f}mm) — 몸 전체 탈출까지 "
+                  f"+{EXIT_EXTRA * 1000:.0f}mm 더 후진")
 
     # 🎯 전멸 즉시 종료 (2026-08-07 사용자 지시) — 죽은 로봇을 두고 스텝
     #    예산을 태우지 않는다. 실패는 이미 났고, 다음 시도가 더 싸다.
@@ -2466,9 +4219,24 @@ while True:
                 #    경로는 `curve_speed()` 를 안 불러 관절합이 상태줄에 없었다
                 #    — 눈으로 본 것을 숫자로 확인할 수 없었다는 뜻이다.
                 #    관절 4개 × 상한 STEER_MAX 17° = 68° 가 만석이다.
+                # 🎯 자산 방식에 따라 **다른 것을 찍는다** (2026-08-09).
+                #    v1_1 의 피치/요 표시는 D6 전제라, v9(롤+굽힘)에서는
+                #    항상 0 으로 찍혀 아무것도 안 보였다 — 오늘 배운 그대로
+                #    "결과만 보고 원인을 못 보는" 상태가 된다.
                 _qp = _qy = 0.0
-                if r.get("bel_pitch") or r.get("bel_yaw"):
-                    _qq = np.asarray(r["art"].get_joint_positions())
+                _rb = ""
+                _qq = np.asarray(r["art"].get_joint_positions())
+                if r.get("bend_front"):
+                    _bf = math.degrees(float(np.sum(_qq[r["bend_front"]])))
+                    _br = math.degrees(float(np.sum(
+                        _qq[[k for k in r["bend_dof"]
+                             if k not in r["bend_front"]]])))
+                    _rf = math.degrees(float(np.sum(_qq[r["roll_front"]])))
+                    _rb = (f" 굽힘앞{_bf:+.0f}/뒤{_br:+.0f}° 롤앞{_rf:+.0f}°"
+                           f"(오차{r.get('roll_err_deg', 0.0):+.0f}°)"
+                           f" 지령굽힘{math.degrees(r.get('cmd_bend', 0.0)):+.0f}"
+                           f"/롤{math.degrees(r.get('cmd_roll', 0.0)):+.0f}°")
+                elif r.get("bel_pitch") or r.get("bel_yaw"):
                     _qp = math.degrees(float(np.sum(_qq[r["bel_pitch"]])))
                     _qy = math.degrees(float(np.sum(_qq[r["bel_yaw"]])))
                 _line.append(
@@ -2489,8 +4257,9 @@ while True:
                     f"{'*거부' if r.get('leg_dev', 0.0) > 0.0018 else ''}"
                     f"/뜬{r.get('leg_free_n', 0)}"
                     f"/편차{r.get('leg_spread_now', 0) * 1000:.0f}"
-                    f" 관절합P{_qp:+.0f}/Y{_qy:+.0f}"
-                    f" 차동{r.get('diff_spread', 0.0):.2f}"
+                    f"/상한{r.get('leg_cap', 0) * 1000:.0f}"
+                    + (_rb if _rb else f" 관절합P{_qp:+.0f}/Y{_qy:+.0f}")
+                    + f" 차동{r.get('diff_spread', 0.0):.2f}"
                     # 🎯 **속도가 0 이 되기까지의 관문을 전부 찍는다**
                     #    (2026-08-09 사용자 지적: *"테스트 때 확인할 수 있는
                     #    것인데 왜 자꾸 같은 문제로 회귀하나"*). 그 지적이 맞다 —
@@ -2524,15 +4293,60 @@ while True:
                     f"@{0 if _c is None else _c.joint_range_m:.2f}m)")
                 continue
             _w = r.get("want", (0.0, 0.0))
-            _x = (f" {r.get('v_cmd', 0) * 1000:3.0f}mm/s"
-                  f" 목표P{_w[0]:+.0f}/Y{_w[1]:+.0f}"
-                  f" 지령{r.get('cmd_pitch', 0):+.0f}/{r.get('cmd_yaw', 0):+.0f}"
-                  f" 관절합P{r.get('q_pitch', 0):+.0f}/Y{r.get('q_yaw', 0):+.0f}"
-                  f" 다리편차{r.get('leg_spread_now', 0) * 1000:.1f}"
-                  f"/기준벗어남{r.get('leg_dev', 0) * 1000:.1f}mm"
-                  f" 배율{r.get('want_f', 1):.2f}"
-                  f" 실제P{r.get('act_pitch', 0):+.0f}"
-                  f"/Y{r.get('act_yaw', 0):+.0f}")
+            if r.get("bend_front"):
+                # 🎯 정답지 롤+굽힘 판단 사슬 (2026-08-10) — 종전에는 D6 용
+                #    피치/요 칸이 전부 0 으로 찍혀 **T 이탈 80mm 의 원인을
+                #    지령/실측 어느 쪽에서도 볼 수 없었다**(어제 교훈 재발:
+                #    결과만 보고 원인을 못 보는 상태줄).
+                _qq2 = np.asarray(r["art"].get_joint_positions())
+                _bf2 = math.degrees(float(np.sum(_qq2[r["bend_front"]])))
+                _br2 = math.degrees(float(np.sum(_qq2[
+                    [k for k in r["bend_dof"] if k not in r["bend_front"]]])))
+                _rf2 = math.degrees(float(np.sum(_qq2[r["roll_front"]])))
+                _rr2 = math.degrees(float(np.sum(_qq2[
+                    [k for k in r["roll_dof"] if k not in r["roll_front"]]])))
+                # 🎯 **몸통 절대 롤** (2026-08-10 저녁 — 사용자 가설: 수직곡관
+                #    하강 중 몸이 비틀린 채 T 에 도착해 다리 클로킹이 복불복.
+                #    임무 규격대로 후방 세그 기준·중력 참조로 잰다. 런별
+                #    T 도착 롤과 정지 양상의 상관을 이 값으로 검증한다.)
+                _Rb4 = wrot(r["seg0"])
+                _bx4 = _Rb4 @ np.array([1.0, 0.0, 0.0])
+                _by4 = _Rb4 @ np.array([0.0, 1.0, 0.0])
+                _up4 = np.array([0.0, 0.0, 1.0]) \
+                    - _bx4 * float(_bx4[2])
+                _n4b = float(np.linalg.norm(_up4))
+                _rabs = 0.0
+                if _n4b > 1e-6:
+                    _up4 /= _n4b
+                    _rabs = math.degrees(math.atan2(
+                        float(np.dot(np.cross(_up4, _by4), _bx4)),
+                        float(np.dot(_up4, _by4))))
+                r["body_roll_abs"] = _rabs
+                _x = (f" {r.get('v_cmd', 0) * 1000:3.0f}mm/s"
+                      f" 이탈{off_now * 1000:4.1f}mm"
+                      f" 몸롤{_rabs:+.0f}°"
+                      f" 굽힘F{r.get('bp_f_deg', 0.0):+.0f}"
+                      f"→{_bf2:+.0f}/R{r.get('bp_r_deg', 0.0):+.0f}"
+                      f"→{_br2:+.0f}°"
+                      f" 롤F{math.degrees(r.get('cmd_roll', 0.0)):+.0f}"
+                      f"→{_rf2:+.0f}"
+                      f"/R{math.degrees(r.get('cmd_roll_r', 0.0)):+.0f}"
+                      f"→{_rr2:+.0f}°"
+                      f" 다리편차{r.get('leg_spread_now', 0) * 1000:.1f}"
+                      f"/뜬{r.get('leg_free_n', 0)}"
+                      f" 배율{r.get('want_f', 1):.2f}")
+            else:
+                _x = (f" {r.get('v_cmd', 0) * 1000:3.0f}mm/s"
+                      f" 목표P{_w[0]:+.0f}/Y{_w[1]:+.0f}"
+                      f" 지령{r.get('cmd_pitch', 0):+.0f}"
+                      f"/{r.get('cmd_yaw', 0):+.0f}"
+                      f" 관절합P{r.get('q_pitch', 0):+.0f}"
+                      f"/Y{r.get('q_yaw', 0):+.0f}"
+                      f" 다리편차{r.get('leg_spread_now', 0) * 1000:.1f}"
+                      f"/기준벗어남{r.get('leg_dev', 0) * 1000:.1f}mm"
+                      f" 배율{r.get('want_f', 1):.2f}"
+                      f" 실제P{r.get('act_pitch', 0):+.0f}"
+                      f"/Y{r.get('act_yaw', 0):+.0f}")
             _line.append(f"{r['name']} s={s_now * 1000:5.0f}"
                          f"{'→' if r['dir'] > 0 else '←'}"
                          f" 끼임{r['stuck']}{_x}"
