@@ -1,8 +1,8 @@
 // Camera — 로봇 한 대의 **지금 켜져 있는 카메라 한 대만** 본다.
 //
-// 🚨 시연은 한 번에 한 대만 발행한다: 전진이면 전방, 후진(RETURN·RECOVER)이면
-//    후방, 정렬~아크(ALIGN·EXTEND·ARC)면 토치. 분기 규칙의 단일 출처는 시연의
-//    `active_camera_name()` 이고, 켜진 역할은 `drive_state.cam` 으로 온다.
+// 🚨 v1_3 은 로봇당 한 대만, 항상 그 역할을 발행한다 — floor1 전방 / floor2
+//    토치(후방 카메라는 폐지). 켜진 역할은 `drive_state.cam` 으로 온다. 이
+//    칸은 그 값을 그대로 따라가므로 층별 매핑을 여기 하드코딩하지 않는다.
 //
 // 🔑 **화면도 한 칸만 만든다.** 예전에는 3칸을 나란히 띄워 놓고 둘은 늘 "대기"
 //    였는데, 안 쓰는 칸이 마지막 프레임을 디코딩된 채로 붙들고 있었다(브라우저는
@@ -14,10 +14,11 @@
 import {store, bus, showFrame, dropOtherCams, robotCols}
   from '/static/app.js';
 
+// v1_3: 로봇당 카메라 1대 고정 — floor1 전방(rgb) / floor2 토치(torch/rgb).
+// rear 는 폐지됐다(더 이상 발행되지 않는다).
 const CAM = {
-  front: {name: '전방 카메라', topic: 'rgb/compressed', when: '전진 주행'},
-  rear: {name: '후방 카메라', topic: 'rear/rgb/compressed', when: '후진·복귀'},
-  torch: {name: '토치 카메라', topic: 'torch/rgb/compressed', when: '정렬~용접'},
+  front: {name: '전방 카메라', topic: 'rgb/compressed', when: '주행'},
+  torch: {name: '토치 카메라', topic: 'torch/rgb/compressed', when: '결함·용접부'},
 };
 
 /** 카메라 한 칸을 el 안에 만든다. 해제 함수를 돌려준다.
@@ -126,8 +127,7 @@ export function mount(el) {
   const legend = document.createElement('div');
   legend.className = 'legend';
   legend.innerHTML = '어안 140° · 10Hz JPEG · <b>로봇 한 대당 한 칸</b> — '
-    + '한 번에 한 대만 켜진다(전진 전방 / 후진 후방 / 정렬~아크 토치). '
-    + '분기가 바뀌면 그 칸이 새 카메라로 갈아 끼워진다.';
+    + 'floor1 전방 / floor2 토치(용접부). 각 로봇이 자기 역할을 항상 발행한다.';
   el.appendChild(legend);
   const offs = robotCols(el).map(
     ({r, el: slot}) => mountCam(slot, {robot: r}));

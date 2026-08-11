@@ -10,8 +10,7 @@ const PILL = {   // FSM 상태 → 색
   RUN: 'run', SETTLE: 'warn', HOLD: 'warn', STUCK: 'bad', INSPECT: 'warn',
   REPAIR: 'warn', RETURN: 'run', DONE: 'run', DEAD: 'bad',
 };
-const CAM_NAME = {front: '전방 카메라', rear: '후방 카메라',
-                  torch: '토치 카메라'};
+const CAM_NAME = {front: '전방 카메라', torch: '토치 카메라'};
 
 /** 로봇 한 대의 요약 칸. {draw…} 를 돌려준다. */
 function mountOne(el, r) {

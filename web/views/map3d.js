@@ -33,9 +33,9 @@ import {mountCam} from '/static/views/camera.js';
 import {mountButtons, mountAllButtons} from '/static/views/handling.js';
 import {mountFloorPanels} from '/static/views/status.js';
 
-// 카메라 분기 설명 — 조종석(handling.js)과 같은 문구를 쓴다
-const CAM_WHEN = {front: '전진 — 전방', rear: '후진·복귀 — 후방',
-                  torch: '정렬~용접 — 토치'};
+// 카메라 역할 설명 — 조종석(handling.js)과 같은 문구를 쓴다
+// (v1_3: floor1 전방 / floor2 토치 고정, rear 폐지)
+const CAM_WHEN = {front: '전방 — 주행', torch: '토치 — 결함·용접부'};
 
 // 첫 프레임용 초기 크기일 뿐이다 — 실제 크기는 mount 의 ResizeObserver 가
 // 칸(#map3d, CSS 로 화면 높이를 채운다)에서 재서 VW/VH 에 넣는다.
