@@ -131,6 +131,12 @@ RELATIVE = {
     "rear_camera_info": "rear/camera_info",  # sensor_msgs/CameraInfo
     "torch_rgb": "torch/rgb/compressed",     # sensor_msgs/CompressedImage
     "torch_camera_info": "torch/camera_info",  # sensor_msgs/CameraInfo
+    # dongyeon 검출의 opencv 디버그 오버레이. pc2(floor2)가 활성 카메라 위에
+    # 검출 결과를 그려 계속 발행한다 — 웹의 floor2 카메라 칸은 이걸 쓴다.
+    # 🔑 real_map_demo_v1_3.py 가 발행하는 실제 이름에 맞춘다
+    #    (`dy_pub["debug"]` → `/{ns}/repair_robot/opencv_debug/compressed`).
+    #    타입은 이름과 무관하게 **CompressedImage jpeg** 다.
+    "debug_rgb": "repair_robot/opencv_debug/compressed",  # sensor_msgs/CompressedImage (jpeg)
     # ── Isaac → ROS 노드 : 상태 ────────────────────────────────────────
     "odom": "odom",                          # nav_msgs/Odometry
     "imu": "imu",                            # sensor_msgs/Imu

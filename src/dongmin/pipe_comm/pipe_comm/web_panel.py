@@ -454,13 +454,23 @@ class PanelNode(Node):
             self.create_subscription(
                 UInt8MultiArray, t.mesh, lambda m, r=r: self._on_mesh(m, r),
                 contract.latched_qos())
-            # 카메라 — v1_3 은 로봇당 1대만 발행한다(floor1 전방 / floor2 토치).
-            # 둘 다 항상 10Hz. rear 는 폐지돼 구독을 지웠다(위 CAM_CH 참고).
+            # 카메라 — v1_3: floor1 은 전방(rgb), floor2 는 torch 슬롯을 쓴다
+            # (rear 는 폐지, 위 CAM_CH 참고).
             self.create_subscription(
                 CompressedImage, t.rgb,
                 lambda m, r=r: r.set_cam("front", bytes(m.data)), sq)
+            # 🔑 floor2 의 torch 슬롯은 **dongyeon opencv 오버레이**로만 채운다
+            #    (contract.debug_rgb = `repair_robot/opencv_debug/compressed`
+            #    — real_map_demo_v1_3.py `dy_pub["debug"]` 가 발행하는 실제
+            #    이름. 이름과 무관하게 CompressedImage jpeg).
+            #    floor2 는 drive_state.cam 이 torch 라(real_map_demo_v1_3.py:5183,
+            #    cams 첫 역할) 이 칸이 화면에 뜬다. 🚨 Isaac 원본 torch 카메라
+            #    (`torch/rgb/compressed`) 구독은 **일부러 뺐다** — 켜 두면 opencv
+            #    안 된 원본이 같은 슬롯을 덮어써 오버레이가 안 보였다(실측
+            #    2026-08-11). floor1 은 opencv_debug 를 발행 안 하니 기존
+            #    front(rgb) 그대로다.
             self.create_subscription(
-                CompressedImage, t.torch_rgb,
+                CompressedImage, t.debug_rgb,
                 lambda m, r=r: r.set_cam("torch", bytes(m.data)), sq)
             self.create_subscription(
                 Odometry, t.odom,
@@ -596,9 +606,17 @@ def bake_mesh(usd: Path, z_shift_mm: float, logger) -> Path | None:
         spec.loader.exec_module(mod)
         logger.info(f"CAD 메시 굽는 중 — {usd.name} (z {z_shift_mm:+.0f}mm)…")
         return mod.convert(usd, z_shift_mm)
-    except Exception as exc:                     # pxr 없음·USD 깨짐 등 전부
+    except (Exception, SystemExit) as exc:       # pxr 없음·USD 깨짐 등 전부
+        # 🚨 SystemExit 도 반드시 잡는다 — tools/usd_to_webmesh.py 는 pxr 가
+        #    없으면 **import 단계에서 `raise SystemExit`** 한다(그 파일 상단).
+        #    SystemExit 은 Exception 이 아니라 BaseException 이라, 그냥
+        #    `except Exception` 이면 여기를 빠져나가 노드를 통째로 죽인다.
+        #    "메시는 항상 덤" 이라는 이 함수의 약속을 지키려면 이걸 삼켜서
+        #    None 을 돌려주고, find_mesh 가 기존 `.webmesh` 로 폴백하게 둔다
+        #    (usd-core 없는 관제 PC 에서 3D 맵이 안 뜨던 원인 — 2026-08-11).
         logger.warning(f"CAD 메시를 못 구웠다({exc.__class__.__name__}: {exc}) "
-                       f"— 3D 맵은 코스 튜브만 그린다")
+                       f"— 이미 구워진 .webmesh 가 있으면 그것을 쓰고, "
+                       f"없으면 3D 맵은 코스 튜브만 그린다")
         return None
 
 

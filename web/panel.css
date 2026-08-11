@@ -199,8 +199,11 @@ code,.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
 .m3-mid .fstat thead th{font-size:calc(var(--fs-stat) - 4px)}
 .m3-mid .pill{font-size:calc(var(--fs-stat) - 6px)}
 /* 오른쪽 카메라 칸 — 제목 줄을 얇게 (그림에 자리를 준다) */
-.camcard h2{margin-bottom:8px}
+.camcard h2{margin-bottom:8px;font-size:24px}   /* 1층/2층 카메라 제목 2배(기본 12px) */
 .camcard .camwhen{font-weight:400;text-transform:none;letter-spacing:0}
+/* 캡션 이름('전방/토치 카메라') — 오른쪽에 놓고 1.5배(기본 13px) */
+.m3-cam .cam .capt b{font-size:19.5px;order:9;margin-left:auto}
+.m3-cam .cam .capt .fps{margin-left:0}
 /* 🔑 카메라 두 칸이 **칸 높이를 반씩 나눠 갖는다.** 16:9 로 고정하면 칸이
    넓어질수록 세로도 같이 커져서 아래 칸(1층)이 화면 밖으로 밀린다 — 실측
    2026-08-10(사이드바를 걷어내 칸이 넓어지자 바로 드러났다). 그림은

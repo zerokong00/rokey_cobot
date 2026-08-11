@@ -14,11 +14,13 @@
 import {store, bus, showFrame, dropOtherCams, robotCols}
   from '/static/app.js';
 
-// v1_3: 로봇당 카메라 1대 고정 — floor1 전방(rgb) / floor2 토치(torch/rgb).
+// v1_3: 로봇당 카메라 1대 고정 — floor1 전방(rgb) / floor2 토치.
+// floor2 토치 칸은 dongyeon opencv 오버레이(repair_robot/opencv_debug/
+// compressed)를 받는다 — real_map_demo_v1_3.py 가 발행하는 실제 이름.
 // rear 는 폐지됐다(더 이상 발행되지 않는다).
 const CAM = {
-  front: {name: '전방 카메라', topic: 'rgb/compressed', when: '주행'},
-  torch: {name: '토치 카메라', topic: 'torch/rgb/compressed', when: '결함·용접부'},
+  front: {name: '전방 카메라', topic: 'rgb/compressed'},
+  torch: {name: '토치 카메라', topic: 'repair_robot/opencv_debug/compressed'},
 };
 
 /** 카메라 한 칸을 el 안에 만든다. 해제 함수를 돌려준다.
