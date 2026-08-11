@@ -61,15 +61,25 @@ CenterLine), 이 노드가 받아 웹소켓 {"type":"course"} 로 페이지에 �
 맵이 바뀌면 시연 쪽만 고치면 된다. 로봇 위치(pos_m)·결함(s, 시계각)은
 그 좌표계(월드 m) 그대로 그린다.
 
-CAD 메시: `tools/usd_to_webmesh.py` 로 구운 `.webmesh` 가 있으면 `/mesh` 로
-서빙하고, 페이지가 전체 맵(floor2+floor1+aisle)을 반투명 메시로 그린다.
-파일이 없으면 코스 튜브만으로 동작한다 — 메시는 항상 **덤**이다.
-경로: `-p mesh:=<파일>` 지정 > $COBOT3_WS/src/dongyeon/integration_test/
-maps/*.webmesh 중 최신 것.
+CAD 메시: 🔑 **맵의 주인은 이 PC 다** (2026-08-11 로직 변경). 예전에는
+Isaac(PC2)이 구워 `mesh` 토픽으로 넘겨 줬는데, 이제 이쪽도 맵 USD 를 갖고
+있으므로 **여기서 굽는다.** 기동 때 `src/son/maps/restroom_final0807.usd`
+(=`DEFAULT_MAP_USD`)를 `tools/usd_to_webmesh.py` 로 구워 `/mesh` 로 서빙하고,
+페이지가 전체 맵(floor2+floor1+aisle)을 반투명 메시로 그린다.
+
+🔑 **이미 구워진 `.webmesh` 가 있으면 그대로 쓴다** — 매번 굽지 않는다. 다시
+   굽는 것은 파일이 없거나 · `.usd` 가 더 새롭거나 · 다른 z 프레임으로 구워져
+   있을 때뿐이다(find_mesh). 굽는 데는 0.5초쯤 걸린다.
+🚨 z_shift 는 시연과 **같아야 한다** — `-p z_shift_mm:=` 기본값 2740.2 는
+   `real_map_demo_v1_3.py` 의 `-_Z1` 이다. 틀리면 에러 없이 건물만 어긋난다.
+
+경로 우선순위: `-p mesh:=<파일>` 지정 > `src/son/maps/` 에서 굽기·재사용 >
+`mesh` 토픽(Isaac 이 보내면 — 이제 폴백이다). 셋 다 없으면 코스 튜브만으로
+동작한다 — 메시는 항상 **덤**이다.
 
 🔑 메시에는 **건물 전체(두 층 다)** 가 들어 있다. 그래서 로봇이 두 대여도
-   `/mesh` 는 하나만 준다 — 먼저 도착한 쪽 것을 **기준 프레임**으로 삼고
-   나머지 로봇을 거기에 맞춘다(`?robot=` 로 특정 로봇 것을 따로 볼 수 있다).
+   `/mesh` 는 하나만 준다 — 그 하나를 **기준 프레임**으로 삼고 나머지 로봇을
+   거기에 맞춘다(`?robot=` 로 특정 로봇 것을 따로 볼 수 있다).
 
 ━━ 지령 경로 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -107,6 +117,11 @@ from pipe_comm.drive_monitor import _quat_to_roll
 # 이름 없는 옛 절대 토픽도 첫 번째 로봇 것으로 같이 받는다.
 DEFECT_REPORT_REL = "defect/report_json"
 DEFECT_REPORT_TOPIC = "/" + DEFECT_REPORT_REL
+
+# 맵 USD 는 **이 PC 가 갖고 있다** — `src/son/maps/`. 이 이름은 시연 쪽
+# `real_map_demo_v1_3.py` 의 `_MAP` 과 **같아야 한다**: 둘이 갈라지면 웹의
+# 3D 맵이 로봇과 다른 건물을 그린다(에러는 안 난다).
+DEFAULT_MAP_USD = "restroom_final0807.usd"
 
 # 웹소켓 바이너리 머리 **2 바이트** = [로봇 번호, 카메라 채널].
 # 🔑 로봇이 늘면서 1 바이트로는 모자라졌다. 번호는 `hello` 가 알려 주는
@@ -320,7 +335,7 @@ class Hub:
         # 봐서는 못 읽는다(구독자 0 이면 로봇에는 아예 안 갔을 수도 있다).
         self.cmds = []
         self.cmds_dropped = 0
-        # 로컬 파일에서 읽은 폴백 메시 (Isaac 쪽에서 아무것도 안 오면 쓴다)
+        # 로컬 `src/son/maps/` 에서 굽거나 읽은 메시 — **이제 이쪽이 정본이다**
         self.file_mesh = None
         self.file_z_shift = None
 
@@ -337,11 +352,14 @@ class Hub:
         🚨 돌려주는 z 는 로봇이 말한 좌표 프레임이 아니라 **메시 헤더의 값**
            이다 — 기준은 그림 쪽이다(RobotStore.mesh_z_mm 주석 참고).
         """
+        # 🔑 **로컬 파일이 먼저다** (2026-08-11 로직 변경). 맵 USD 를 이 PC 가
+        #    갖고 있고 여기서 굽기 때문이다 — Isaac 이 `mesh` 토픽으로 보내는
+        #    것은 이제 폴백이다(옛 시연·다른 PC 구성에서는 여전히 온다).
+        if self.file_mesh is not None:
+            return None, self.file_mesh, self.file_z_shift
         for r in self.robots:
             if r.mesh is not None:
                 return r.ns, r.mesh, r.mesh_z_mm
-        if self.file_mesh is not None:
-            return None, self.file_mesh, self.file_z_shift
         return None, None, None
 
     def roster(self):
@@ -395,16 +413,20 @@ class PanelNode(Node):
         self.declare_parameter("port", 8080)
         self.declare_parameter("mesh", "")   # .webmesh 경로 (빈 값 = 자동 탐색)
         # 🔑 `.webmesh` 가 없거나 낡았으면 기동 때 **직접 굽는다**(0.5초쯤).
-        #    map_usd 를 비우면 maps/ 의 가장 최근 `.usd` 를 고른다.
-        #    🚨 z_shift 는 **층마다 다르다** — real_map_demo floor2 가 250 이다.
-        #       틀리면 건물이 로봇보다 위/아래로 통째로 어긋나 보인다.
+        #    map_usd 를 비우면 `src/son/maps/` 에서 고른다(DEFAULT_MAP_USD).
+        #    🚨 z_shift 가 틀리면 건물이 로봇보다 위/아래로 통째로 어긋난다.
+        #       기본값 2740.2 는 `real_map_demo_v1_3.py` 의 `-_Z1` 이다 —
+        #       그쪽이 수평망을 월드 z=0 으로 올려놓고 좌표를 내므로 그림도
+        #       같은 만큼 올려 구워야 겹친다. **저쪽을 고치면 여기도 고칠 것.**
         self.declare_parameter("map_usd", "")
-        self.declare_parameter("z_shift_mm", 250.0)
-        # 🚨 **기본은 끈다.** 굽는 쪽은 Isaac 이다 — 맵 배치(층별 z)를 아는 것이
-        #    거기뿐이라, 여기서도 구우면 둘이 다른 z 로 구워 **나중에 실행한
-        #    쪽이 이기는 경합**이 된다. 이 손잡이는 "시연 없이 웹만 띄워 볼 때"
-        #    의 탈출구다. Isaac 쪽은 `mesh` 토픽으로 넘긴다.
-        self.declare_parameter("bake_mesh", False)
+        self.declare_parameter("z_shift_mm", 2740.2)
+        # 🔑 **기본으로 켠다** (2026-08-11 로직 변경). 예전에는 Isaac(PC2)만
+        #    굽고 `mesh` 토픽으로 넘겼는데, 이제 **이 PC 도 맵 USD 를 갖고
+        #    있으므로 여기서 굽는다.** 이미 구워진 `.webmesh` 가 있으면 그것을
+        #    그대로 쓴다(아래 find_mesh 의 낡음 판정 참고) — 매번 굽지 않는다.
+        #    🔑 경합 걱정은 없어졌다: 양쪽이 **같은 맵 파일과 같은 z_shift** 를
+        #       쓰므로 누가 구워도 같은 그림이 나온다.
+        self.declare_parameter("bake_mesh", True)
         # 🚨 이 초 동안 `drive_state` 가 없으면 **시연이 죽은 것으로 보고 판을
         #    접는다**(마지막 상태·답파·결함을 버린다). 안 그러면 시연을 끄고
         #    새로고침해도 화면이 지난 판 그대로다 — 살아 있는 것처럼 보인다.
@@ -581,31 +603,50 @@ def bake_mesh(usd: Path, z_shift_mm: float, logger) -> Path | None:
 
 
 def find_mesh(explicit: str, logger, map_usd: str = "",
-              z_shift_mm: float = 250.0, bake: bool = True) -> bytes | None:
+              z_shift_mm: float = 2740.2, bake: bool = True) -> bytes | None:
     """`.webmesh` 를 찾아 통째로 읽는다. 없으면 None — 페이지는 코스만 그린다.
 
-    🔑 **없거나 낡았으면 그 자리에서 굽는다**(0.5초쯤). 손으로 한 번 굽는 것을
-       잊어 "3D 맵에 건물이 안 보인다" 가 되는 일이 잦아서다. `.usd` 보다
-       오래된 `.webmesh` 도 다시 굽는다 — **낡은 메시는 없는 것보다 나쁘다**
-       (맵이 바뀐 줄 모르고 옛 건물 위에 로봇을 그린다).
+    🔑 **이 PC 가 맵의 주인이다** (2026-08-11). 맵 USD 는 `src/son/maps/` 에
+       있고, 여기서 `.webmesh` 로 구워 `/mesh` 로 서빙한다. Isaac(PC2)이
+       `mesh` 토픽으로 보내 주기를 기다리지 않는다.
+    🔑 **이미 구워져 있으면 그것을 쓴다** — 매번 굽지 않는다. 다시 굽는 것은
+       셋 중 하나일 때뿐이다: 파일이 없다 · `.usd` 가 더 새롭다 · **다른
+       z 프레임으로 구워져 있다**. 마지막 것을 빼먹으면 층을 바꿔도 옛 z 로
+       구운 파일을 그대로 써서 에러 없이 건물만 어긋난다.
+       🚨 낡은 메시는 없는 것보다 나쁘다 — 맵이 바뀐 줄 모르고 옛 건물 위에
+          로봇을 그린다. 그래서 mtime 비교를 넣어 뒀다.
 
-    map_usd     구울 원본. 비우면 maps/ 에서 가장 최근 `.usd` 를 고른다.
-    z_shift_mm  맵 z 오프셋. real_map_demo floor2 기준 250 (floor1 은 다르다).
+    map_usd     구울 원본. 비우면 `src/son/maps/` 에서 고른다(아래 규칙).
+    z_shift_mm  맵 z 오프셋. `real_map_demo_v1_3.py` 의 `-_Z1` = 2740.2.
     bake        False 면 옛 동작(찾기만 한다).
     """
+    maps = _ws() / "src/son/maps"
     if explicit:
         cands = [Path(explicit)]
     else:
-        cands = sorted(
-            _ws().glob("src/dongyeon/integration_test/maps/*.webmesh"),
-            key=lambda p: p.stat().st_mtime, reverse=True)
+        cands = sorted(maps.glob("*.webmesh"),
+                       key=lambda p: p.stat().st_mtime, reverse=True)
 
-    # 구울 원본을 정한다 — 지정이 없으면 maps/ 의 가장 최근 .usd.
+    # 구울 원본을 정한다.
+    # 🚨 **"가장 최근 파일" 로만 고르면 안 된다.** maps/ 에는 시연이 안 쓰는
+    #    맵도 같이 있어서(reducer·tshape·straight290 …) 엉뚱한 건물을 구워도
+    #    에러가 안 난다. 시연이 쓰는 이름을 먼저 찾고, 없을 때만 최근 것으로
+    #    물러선다. 🔑 이름은 `real_map_demo_v1_3.py` 의 `_MAP` 과 같아야 한다.
+    #    🚨 `*.usda` 는 일부러 안 본다 — maps/ 의 `.usda` 들은 부품·시험용이라
+    #       mtime 이 더 새로워서 넣으면 그쪽이 뽑힌다.
     usd = Path(map_usd) if map_usd else None
     if bake and usd is None:
-        usds = sorted(_ws().glob("src/dongyeon/integration_test/maps/*.usd"),
-                      key=lambda p: p.stat().st_mtime, reverse=True)
-        usd = usds[0] if usds else None
+        named = maps / DEFAULT_MAP_USD
+        if named.is_file():
+            usd = named
+        else:
+            usds = sorted(maps.glob("*.usd"),
+                          key=lambda p: p.stat().st_mtime, reverse=True)
+            usd = usds[0] if usds else None
+            if usd is not None:
+                logger.warning(f"{DEFAULT_MAP_USD} 가 없다 — 가장 최근 "
+                               f"{usd.name} 으로 굽는다. 시연이 쓰는 맵과 "
+                               f"같은지 확인할 것")
 
     if bake and usd is not None and usd.is_file():
         out = usd.with_suffix(".webmesh")

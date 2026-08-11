@@ -58,8 +58,7 @@ export function mountButtons(el, r, opts = {}) {
     <button class="b-run go">▶ 시작</button>
     <button class="b-forward">${C ? '⏩ 전진' : '⏩ 전진 점검'}</button>
     <button class="b-recall">↩ 복귀</button>
-    <button class="b-estop">${C ? '⛔ E-STOP' : '⛔ 비상정지'}</button>
-    <button class="b-release">${C ? '🔓 해제' : '🔓 비상정지 해제'}</button>
+    <button class="b-estop"></button>
    </div>`
    + (opts.toast ? '' : '<div class="toast"></div>');
 
@@ -109,18 +108,43 @@ export function mountButtons(el, r, opts = {}) {
 
   $('b-forward').onclick = () => to('FORWARD');
   $('b-recall').onclick = () => to('RECALL');
-  // 🔑 **비상정지와 해제는 확인 팝업 없이 그 자리에서 나간다** (사용자 지시
-  //    2026-08-10). 비상정지는 한 박자라도 늦으면 비상정지가 아니고, 시연
-  //    중에 뜨는 모달은 그 한 박자를 먹는다. 잘못 눌렀을 때의 대가도
-  //    작다 — ESTOP 은 그 자리에 서는 것뿐이고 해제는 HOLD 로 갈 뿐이다
-  //    (해제해도 **바로 안 간다** — ▶ 시작을 다시 눌러야 움직인다).
-  $('b-estop').onclick = () => to('ESTOP');
+
+  // ── ⛔ 비상정지 / 🔓 해제 — **버튼 하나가 둘을 겸한다** ──────────
+  // 🔑 예전에는 `b-release` 가 따로 있었다. 해제는 **비상정지 중일 때만**
+  //    의미가 있으므로 늘 떠 있을 이유가 없고, 두 개가 나란히 있으면 급할 때
+  //    엉뚱한 쪽을 누른다 — 같은 자리에서 얼굴만 바꾸게 했다(2026-08-11).
+  // 🚨 **안 움직이는 로봇에는 비상정지를 못 누른다**(비활성). 상태가 오기
+  //    전이나 서 있는 동안 눌려도 할 일이 없고, 눌린 흔적만 남아 헷갈린다.
+  //    기준은 시연이 보내오는 `moving` 하나다(규약 MOVING_STATES =
+  //    RUN·STUCK·RETURN) — 내가 뭘 눌렀는지가 아니라 로봇이 실제로 가는지.
+  const estopBtn = $('b-estop');
+
+  function syncEstop() {
+    const d = r.state, dead = !!(d && d.state === 'DEAD');
+    // 🔑 해제 얼굴일 때는 `b-release` 를 얹어 색을 바꾼다 — 규칙이 뒤에 있어
+    //    같은 특이도로 `b-estop` 의 빨강을 이긴다(panel.css 의 순서).
+    estopBtn.classList.toggle('b-release', dead);
+    estopBtn.disabled = !dead && !(d && d.moving);
+    estopBtn.textContent = dead ? (C ? '🔓 해제' : '🔓 비상정지 해제')
+                                : (C ? '⛔ E-STOP' : '⛔ 비상정지');
+  }
+
+  // 🔑 **확인 팝업 없이 그 자리에서 나간다** (사용자 지시 2026-08-10).
+  //    비상정지는 한 박자라도 늦으면 비상정지가 아니고, 시연 중에 뜨는 모달은
+  //    그 한 박자를 먹는다. 잘못 눌렀을 때의 대가도 작다 — ESTOP 은 그 자리에
+  //    서는 것뿐이고, 해제는 HOLD 로 갈 뿐이다(해제해도 **바로 안 간다** —
+  //    ▶ 시작을 다시 눌러야 움직인다).
   // 🔑 해제는 **START 에 reason 을 실어** 보낸다 — 규약에 지령을 새로 만들지
   //    않으면서도, 실수로 ▶ 시작을 눌러 비상정지가 풀리는 일은 막는다.
-  $('b-release').onclick = () => to('START', {reason: 'ESTOP_RELEASE'});
+  estopBtn.onclick = () => {
+    if (r.state && r.state.state === 'DEAD')
+      to('START', {reason: 'ESTOP_RELEASE'});
+    else
+      to('ESTOP');
+  };
 
-  syncRun();                         // 상태가 아직 없어도 버튼은 맞춰 둔다
-  return bus.on('state', rr => { if (rr === r) syncRun(); });
+  syncRun(); syncEstop();            // 상태가 아직 없어도 버튼은 맞춰 둔다
+  return bus.on('state', rr => { if (rr === r) { syncRun(); syncEstop(); } });
 }
 
 /** 조종석 한 벌(로봇 하나). {draw, off} 를 돌려준다. */
@@ -199,7 +223,8 @@ function mountSeat(el, r) {
   return {draw, off: () => { offBtn(); offCam(); log.off(); }};
 }
 
-/** "전 로봇에 같이" 버튼 세 개 + toast 를 el 안에 만든다.
+/** "전 로봇에 같이" 버튼 세 개 + toast 를 el 안에 만든다. **해제 함수를
+ * 돌려준다** — 비상정지 버튼이 상태를 따라 얼굴을 바꾸느라 bus 를 잡는다.
  *
  * 🔑 3D Map 의 지령 칸도 이걸 쓴다 — 사이드바를 걷어내면서 Robot Handling
  *    페이지가 꺼졌는데, **층별 프로세스를 동시에 출발시키는 유일한 수단**이
@@ -210,7 +235,7 @@ export function mountAllButtons(el, opts = {}) {
    <div class="btns">
     <button class="b-run go">▶ ${C ? '전체' : '전체 시작'}</button>
     <button>⏸ ${C ? '전체' : '전체 정지'}</button>
-    <button class="b-estop">⛔ ${C ? '전체' : '전체 비상정지'}</button>
+    <button class="b-estop"></button>
    </div>`
    + (opts.toast ? '' : '<div class="toast"></div>');
   const [start, stop, estop] = el.querySelectorAll('button');
@@ -224,8 +249,32 @@ export function mountAllButtons(el, opts = {}) {
   //    정지를 따로 둔다. 토글이 필요하면 각 칸의 버튼을 쓴다.
   start.onclick = () => all('START');
   stop.onclick = () => all('STOP');
+
+  // ── ⛔ 전체 비상정지 / 🔓 전체 해제 — 개별 칸과 같은 규칙 ────────
+  // 🚨 **움직이는 로봇이 하나라도 있으면 ⛔ 가 이긴다.** 한 대는 비상정지
+  //    중이고 다른 한 대가 달리는 섞인 상태에서 이 버튼이 "해제" 얼굴이면,
+  //    정작 세워야 할 로봇을 세울 수단이 사라진다 — 멈추는 쪽이 우선이다.
+  //    (그 상태에서 해제는 해당 층 버튼으로 개별로 한다.)
+  function syncEstop() {
+    const moving = store.robots.some(r => r.state && r.state.moving);
+    const dead = store.robots.some(r => r.state && r.state.state === 'DEAD');
+    const rel = dead && !moving;
+    estop.classList.toggle('b-release', rel);
+    estop.disabled = !moving && !dead;
+    estop.textContent = rel ? (C ? '🔓 전체 해제' : '🔓 전체 비상정지 해제')
+                            : (C ? '⛔ 전체' : '⛔ 전체 비상정지');
+  }
+
   // 개별 칸과 같은 이유로 **확인 팝업 없이** 바로 나간다(위 mountButtons 참고).
-  estop.onclick = () => all('ESTOP');
+  estop.onclick = () => {
+    const moving = store.robots.some(r => r.state && r.state.moving);
+    const dead = store.robots.some(r => r.state && r.state.state === 'DEAD');
+    if (dead && !moving) all('START', {reason: 'ESTOP_RELEASE'});
+    else all('ESTOP');
+  };
+
+  syncEstop();
+  return bus.on('state', syncEstop);
 }
 
 /** 두 대 이상일 때만 세우는 "전체 지령" 카드 (조종석 페이지용). */
@@ -237,11 +286,11 @@ function mountAll(el) {
      .join(' + ')} 에 같이 보낸다</span></h2>
    <div class="slot"></div>`;
   el.appendChild(card);
-  mountAllButtons(card.querySelector('.slot'));
+  return mountAllButtons(card.querySelector('.slot'));
 }
 
 export function mount(el) {
-  if (store.robots.length > 1) mountAll(el);
+  const offAll = store.robots.length > 1 ? mountAll(el) : null;
   const seats = new Map();
   for (const {r, el: slot} of robotCols(el))
     seats.set(r, mountSeat(slot, r));
@@ -249,5 +298,5 @@ export function mount(el) {
     const s = seats.get(r);
     if (s) s.draw();
   });
-  return () => { off(); seats.forEach(s => s.off()); };
+  return () => { off(); if (offAll) offAll(); seats.forEach(s => s.off()); };
 }

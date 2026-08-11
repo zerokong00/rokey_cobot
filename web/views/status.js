@@ -19,32 +19,33 @@ function headRow(cls) {
     + `</tr>`;
 }
 
-/** 층별 주행 상태 비교표. 다시 그리는 함수를 돌려준다. */
+/** 진행시간 초 → `분:초` (한 시간을 넘으면 `시:분:초`). */
+function hms(sec) {
+  const s = Math.max(0, Math.floor(sec || 0));
+  const p = n => String(n).padStart(2, '0');
+  return s >= 3600
+    ? `${Math.floor(s / 3600)}:${p(Math.floor(s / 60) % 60)}:${p(s % 60)}`
+    : `${Math.floor(s / 60)}:${p(s % 60)}`;
+}
+
+/** 층별 주행 상태 비교표. 다시 그리는 함수를 돌려준다.
+ *
+ * 🔑 **네 줄뿐이다** (사용자 지시 2026-08-11: FSM · 진행률 · 진행시간 · 방향).
+ *    거리·속도·중심선 이탈·롤·끼임·사유는 뺐다 — 가운데 칸에 표 둘과 지령
+ *    버튼이 같이 서야 해서 한 줄이 곧 자리다. 되살릴 때는 아래 ROWS 에
+ *    되돌려 넣으면 그만이다(값은 전부 `r.state` 에 그대로 들어 있다).
+ *    🔑 "지금 켜진 카메라" 줄은 예전부터 없다 — 오른쪽 카메라 칸 제목이
+ *       이미 그것을 적는다.
+ */
 export function mountStateTable(el) {
   // 항목 = 표의 줄. [키, 이름, 로봇 → 문자열]
   const ROWS = [
     ['state', 'FSM', null],          // 배지라 따로 그린다
-    ['prog', '진행', null],          // 막대라 따로 그린다
-    ['s', '거리', r => {
-      const d = r.state || {};
-      return `${(d.s_mm || 0).toFixed(0)} / ${(d.s_total_mm || 0).toFixed(0)}`
-        + ` mm`;
-    }],
-    ['v', '속도', r => {
-      const d = r.state || {};
-      return d.odom_v_mps !== undefined
-        ? `${(d.odom_v_mps * 1000).toFixed(0)} mm/s`
-        : `${((d.speed_mps || 0) * 1000).toFixed(0)} mm/s`;
-    }],
+    ['prog', '진행률', null],        // 막대라 따로 그린다
+    // 🚨 진행시간은 규약에 없다 — app.js 가 `stamp` 로 만든 값이다(안착 제외,
+    //    DONE 에서 멈춤). 상태가 아직 없으면 0:00 이 아니라 `—` 다.
+    ['t', '진행시간', r => r.t0 === null ? '—' : hms(r.elapsedS)],
     ['dir', '방향', r => !r.state ? '—' : (r.state.dir > 0 ? '전진 →' : '후진 ←')],
-    ['off', '중심선 이탈', r => `${((r.state || {}).off_mm || 0).toFixed(1)} mm`],
-    ['roll', '롤', r => (r.state || {}).roll_deg !== undefined
-      ? `${r.state.roll_deg > 0 ? '+' : ''}${r.state.roll_deg}°` : '—'],
-    ['stuck', '끼임 / 왕복', r =>
-      `${(r.state || {}).stuck || 0} / ${(r.state || {}).lap || 0}`],
-    // 🔑 "지금 켜진 카메라" 줄은 일부러 없다 — 오른쪽 카메라 칸의 제목이
-    //    이미 그것을 적는다. 좁은 가운데 칸에서 한 줄이 아깝다.
-    ['reason', '사유', r => (r.state || {}).reason || '—'],
   ];
 
   el.innerHTML = `<table class="fstat"><thead>${headRow('')}</thead><tbody>`
@@ -79,17 +80,18 @@ export function mountStateTable(el) {
   };
 }
 
-/** 층별 결함 현황(검출·수리·대기 갯수 + 최근 몇 건). */
+/** 층별 결함 현황 — **검출·수리 완료 두 줄뿐이다.**
+ *
+ * 🔑 `대기`(검출−수리)와 `최근`(마지막 결함 요약)은 뺐다(사용자 지시
+ *    2026-08-11). 3D Map 가운데 칸이 이 표 **하나만** 남기고 글자를 두 배로
+ *    키운 판이 되면서, 떨어져서 읽을 값은 두 숫자로 족하다는 결론이다.
+ */
 export function mountDefectTable(el) {
   el.innerHTML = `<table class="fstat"><thead>${headRow('')}</thead><tbody>
     <tr data-k="found"><th class="lbl">검출</th>${
       store.robots.map(() => '<td>0</td>').join('')}</tr>
     <tr data-k="done"><th class="lbl">수리 완료</th>${
       store.robots.map(() => '<td>0</td>').join('')}</tr>
-    <tr data-k="wait"><th class="lbl">대기</th>${
-      store.robots.map(() => '<td>0</td>').join('')}</tr>
-    <tr data-k="last"><th class="lbl">최근</th>${
-      store.robots.map(() => '<td>—</td>').join('')}</tr>
    </tbody></table>`;
 
   const cell = (k, i) =>
@@ -102,21 +104,15 @@ export function mountDefectTable(el) {
       cell('found', i).textContent = `${n}건`;
       cell('done', i).innerHTML = done
         ? `<span class="pill run">${done}건</span>` : '0건';
-      // 🚨 "대기" 는 검출 − 수리 다. 음수가 나올 수 있다 — 시연이 검출 노드
-      //    없이 용접만 하면 수리 마커가 결함 행보다 많다. 0 으로 눌러 둔다.
-      const wait = Math.max(0, n - done);
-      cell('wait', i).innerHTML = wait
-        ? `<span class="pill warn">${wait}건</span>` : '0건';
-      const last = [...r.defectRows.values()].pop();
-      cell('last', i).textContent = last
-        ? `${last.defect_id || '?'} ${last.class || ''} `
-          + `${((last.confidence || 0) * 100).toFixed(0)}%`
-        : '—';
     });
   };
 }
 
-/** 두 표를 el 안에 세우고 bus 까지 걸어 준다. 해제 함수를 돌려준다. */
+/** 두 표를 세우고 bus 까지 걸어 준다. 해제 함수를 돌려준다.
+ *
+ * 🔑 화면에서의 위아래는 **로봇 상태 → 결함 현황** 이다(map3d.js 의 카드
+ *    순서). 로봇이 지금 뭘 하는지가 먼저고, 그 결과로 쌓인 숫자가 다음이다.
+ */
 export function mountFloorPanels(stateEl, defectEl) {
   const drawState = mountStateTable(stateEl);
   const drawDefect = mountDefectTable(defectEl);
