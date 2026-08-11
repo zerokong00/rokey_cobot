@@ -58,6 +58,13 @@
 로봇이 한 대씩(3대) 이므로 `/elbow_v` `/elbow_h` `/tee` 로 갈라지고,
 `repair_demo.py` / `real_map_demo.py` 는 한 대라 `/robot` 하나다.
 
+🔑 **층별 2대 동시 주행**(2026-08-10)은 `/floor1` `/floor2` 두 네임스페이스다
+   (`FLOOR_NS`). 1·2층은 **연결하지 않는다** — 각자 자기 층에서 따로 출발해
+   따로 끝난다. 시연은 `ROS_NS` 를 달리한 두 프로세스이고, 관제 패널은
+   `-p ns:=floor1,floor2` 로 둘을 나란히 띄운다(왼쪽 1층 / 오른쪽 2층).
+   🚨 층이 다르면 **월드 좌표 프레임도 다르다** — `course()` 의 `z_shift_mm`
+   설명을 볼 것.
+
     Isaac 쪽 (3.11)                             ROS 노드 쪽 (3.10)
     ───────────────                             ──────────────────
                           ── 센서 ──────────▶
@@ -101,6 +108,16 @@ DEFAULT_NS = "robot"
 
 # `map_test_demo.py` 가 굴리는 코스 3종 = 로봇 3대의 네임스페이스.
 COURSE_NS = ("elbow_v", "elbow_h", "tee")
+
+# 층별 2대 동시 주행의 네임스페이스. **순서가 곧 관제 화면의 왼→오른쪽**이다.
+FLOOR_NS = ("floor1", "floor2")
+# 네임스페이스 → 사람이 읽는 이름. 여기 없는 이름은 그대로 쓴다.
+NS_LABEL = {"floor1": "1층", "floor2": "2층", "robot": "로봇"}
+
+
+def ns_label(ns):
+    """네임스페이스의 표시 이름. `floor1` → `1층`, 모르는 것은 그대로."""
+    return NS_LABEL.get(str(ns).strip("/"), str(ns).strip("/"))
 
 
 # 네임스페이스를 붙이기 전의 상대 토픽 이름. 오른쪽이 메시지 타입이다.
@@ -289,24 +306,35 @@ def mission(cmd, *, mps=None, reason="", t=None):
     return d
 
 
-def course(ns, pts_m, *, ir_m, bend_r_m=0.0, t=None):
+def course(ns, pts_m, *, ir_m, bend_r_m=0.0, z_shift_mm=None, t=None):
     """코스 중심선 표본 — 시연이 기동할 때 **한 번** latched 로 발행한다.
     `Topics.COURSE` + `latched_qos()`.
 
     pts_m      [[s, x, y, z], ...] — 호길이 s 와 월드 좌표(전부 **m**).
                s 오름차순, 간격 불균일 허용(직선은 성기게, 곡관은 조밀하게).
     ir_m       관 내반경(m). 웹이 관 튜브·벽면 좌표(시계각)를 그릴 때 쓴다.
+    z_shift_mm 이 좌표가 원본 맵(USD)에 대해 얼마나 z 로 올라가 있는지.
+               시연의 `-Z_NET` 을 그대로 준다 (`publish_mesh` 와 같은 값).
 
     🔑 이것이 있기 전에는 web_panel JS 에 코너 좌표가 하드코딩되어 있어서
        맵이 바뀌면 시연 코드와 웹을 **따로** 고쳐야 했다. 이제 기하의 단일
        출처는 시연 쪽 CenterLine 하나다 — 웹은 받은 표본을 그대로 그린다.
+
+    🚨 **로봇이 여러 대면 `z_shift_mm` 을 반드시 실어야 한다.** 시연은 활성
+       층의 수평망을 월드 z=0 으로 올려 놓고 좌표를 내므로, 층이 다른 두 대는
+       **서로 다른 프레임**으로 말한다(floor2 +250 / floor1 +2740.23 →
+       2.49m). 이 값이 있어야 관제 화면이 둘을 한 좌표계로 겹쳐 그린다.
+       한 대뿐이면 없어도 된다(기준이 곧 그 로봇이다).
     """
     pts = [[round(float(v), 4) for v in p] for p in pts_m]
     if any(len(p) != 4 for p in pts):
         raise ValueError("pts_m 은 [s,x,y,z] 의 목록이어야 한다")
-    return {"stamp": _stamp(t), "robot": ns, "ir_m": round(float(ir_m), 4),
-            "bend_r_m": round(float(bend_r_m), 4),
-            "s_total_m": pts[-1][0] if pts else 0.0, "pts": pts}
+    d = {"stamp": _stamp(t), "robot": ns, "ir_m": round(float(ir_m), 4),
+         "bend_r_m": round(float(bend_r_m), 4),
+         "s_total_m": pts[-1][0] if pts else 0.0, "pts": pts}
+    if z_shift_mm is not None:
+        d["z_shift_mm"] = round(float(z_shift_mm), 3)
+    return d
 
 
 def repair_target(defect_id, *, s_mm, clock_deg, width_mm=0.0, depth_mm=0.0,

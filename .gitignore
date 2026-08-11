@@ -3,10 +3,12 @@ install/
 log/
 __pycache__/
 *.pyc
-*.usd
 .claude/
 *.onnx
 *.pt
 *.pth
 isaacpjt/dongmin/graphic_file/out/
 CLAUDE.md
+isaacsim_kb/
+.pytest_cache/
+docs/

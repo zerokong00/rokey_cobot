@@ -1,4 +1,4 @@
-// Camera — 지금 켜져 있는 카메라 **한 대만** 본다.
+// Camera — 로봇 한 대의 **지금 켜져 있는 카메라 한 대만** 본다.
 //
 // 🚨 시연은 한 번에 한 대만 발행한다: 전진이면 전방, 후진(RETURN·RECOVER)이면
 //    후방, 정렬~아크(ALIGN·EXTEND·ARC)면 토치. 분기 규칙의 단일 출처는 시연의
@@ -8,7 +8,11 @@
 //    였는데, 안 쓰는 칸이 마지막 프레임을 디코딩된 채로 붙들고 있었다(브라우저는
 //    <img> 에 걸린 그림을 화면 밖이라고 버리지 않는다). 분기가 바뀌면 쓰던 칸을
 //    비우고(objectURL 회수 + src 제거) 새 역할로 갈아 끼운다.
-import {store, bus, showFrame, dropOtherCams} from '/static/app.js';
+//
+// 🔑 로봇이 여러 대면 **칸도 대수만큼** — 다만 한 대당 하나다(위 규칙 그대로).
+//    `mountCam(el, {robot})` 로 어느 로봇의 칸인지 반드시 준다.
+import {store, bus, showFrame, dropOtherCams, robotCols}
+  from '/static/app.js';
 
 const CAM = {
   front: {name: '전방 카메라', topic: 'rgb/compressed', when: '전진 주행'},
@@ -17,8 +21,10 @@ const CAM = {
 };
 
 /** 카메라 한 칸을 el 안에 만든다. 해제 함수를 돌려준다.
- *  opts.bare — 카드 안에 넣을 때(테두리·배경 없이). */
+ *  opts.robot — 어느 로봇의 카메라인가 (없으면 첫 번째).
+ *  opts.bare  — 카드 안에 넣을 때(테두리·배경 없이). */
 export function mountCam(el, opts = {}) {
+  const R = opts.robot || store.robots[0];
   el.innerHTML = `
    <div class="cam${opts.bare ? ' bare' : ''}">
     <div class="capt"><b id="cm-name">—</b>
@@ -36,7 +42,7 @@ export function mountCam(el, opts = {}) {
   let role = null;                 // 지금 이 칸이 보여 주는 역할
 
   /** 지금 켜진 역할. 구판 시연(cam 필드 없음)이면 전방으로 본다. */
-  const active = () => (store.state || {}).cam || 'front';
+  const active = () => ((R && R.state) || {}).cam || 'front';
 
   /** 칸을 비운다 — objectURL 을 회수하고 그림을 떼어 낸다.
    *  🚨 src 를 그냥 두면 역할이 바뀌어도 **앞 카메라의 마지막 그림**이 남는다
@@ -65,16 +71,16 @@ export function mountCam(el, opts = {}) {
     live.hidden = true;
     // 🔑 다른 역할이 붙들고 있던 프레임(Blob)을 놓아 준다 — 안 보는 카메라의
     //    그림을 들고 있을 이유가 없다.
-    dropOtherCams(r);
+    dropOtherCams(R, r);
     draw(r);
   }
 
   function draw(r) {
     if (r !== role) return;        // 지금 보는 역할의 프레임만 그린다
-    if (showFrame(img, r)) {
+    if (showFrame(img, R, r)) {
       nosig.hidden = true;
       live.hidden = false;
-      const c = store.cam[r];
+      const c = R.cam[r];
       fps.textContent = c.fps ? `${c.fps.toFixed(1)} fps` : '';
     }
   }
@@ -84,7 +90,7 @@ export function mountCam(el, opts = {}) {
   // 프레임이 끊기면 fps 가 옛날 값에 얼어붙는다 — 1초마다 늙히고, 오래 끊기면
   // 덮개를 다시 덮는다. 지금 켜진 카메라가 끊긴 것은 **정상이 아니다**.
   const timer = setInterval(() => {
-    const s = store.cam[role];
+    const s = R && R.cam[role];
     if (!s) return;
     const age = (performance.now() - s.t) / 1000;
     if (age > 2) fps.textContent = `${age.toFixed(0)}초 전`;
@@ -96,8 +102,18 @@ export function mountCam(el, opts = {}) {
   }, 1000);
 
   const off = [
-    bus.on('frame', draw),
-    bus.on('state', () => setRole(active())),
+    bus.on('frame', (r, ro) => { if (r === R) draw(ro); }),
+    bus.on('state', (r) => { if (r === R) setRole(active()); }),
+    // 🚨 판이 바뀌면(시연 종료·재시작) **마지막 그림을 떼어 낸다.** 역할이
+    //    그대로면 setRole 이 아무 일도 안 하므로, 지난 판의 프레임이 새 판의
+    //    제목 아래 그대로 걸려 있게 된다 — 화면이 거짓말을 한다.
+    bus.on('reset', (r) => {
+      if (r !== R) return;
+      clearFrame();
+      nosig.textContent = R.stale ? '시연 끊김 — 프레임 없음'
+                                  : '프레임 대기…';
+      live.hidden = true;
+    }),
   ];
   return () => {
     off.forEach(f => f());
@@ -107,14 +123,13 @@ export function mountCam(el, opts = {}) {
 }
 
 export function mount(el) {
-  const wrap = document.createElement('div');
-  wrap.className = 'cams one';
-  el.appendChild(wrap);
   const legend = document.createElement('div');
   legend.className = 'legend';
-  legend.innerHTML = '어안 140° · 10Hz JPEG · <b>한 번에 한 대만</b> 켜진다 '
-    + '(전진 전방 / 후진 후방 / 정렬~아크 토치). 화면도 한 칸만 만든다 — '
-    + '분기가 바뀌면 이 칸이 새 카메라로 갈아 끼워진다.';
+  legend.innerHTML = '어안 140° · 10Hz JPEG · <b>로봇 한 대당 한 칸</b> — '
+    + '한 번에 한 대만 켜진다(전진 전방 / 후진 후방 / 정렬~아크 토치). '
+    + '분기가 바뀌면 그 칸이 새 카메라로 갈아 끼워진다.';
   el.appendChild(legend);
-  return mountCam(wrap);
+  const offs = robotCols(el).map(
+    ({r, el: slot}) => mountCam(slot, {robot: r}));
+  return () => offs.forEach(f => f());
 }
