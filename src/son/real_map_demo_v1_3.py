@@ -249,6 +249,7 @@ TUNING = {
     #    주행 설정값은 v10 사전을 그대로 복사한다(조인트 동일 실측 근거).
     "pipe_robot_v11_weld": dict(
         wheel_r=0.008, wheel_maxf=0.11,
+        # 🎯 스트로크 35 → **50mm** (2026-08-11): 거름망 하우징 사각 벽
         piston_stroke=0.035, piston_init=0.001, piston_maxf=9.0,
         piston_retract=0.015,
         center_delta=0.003,
@@ -861,18 +862,58 @@ _pm.CreateRestitutionAttr(0.0)
 #    유지"). --glass 플래그와 무관하게 전 층 배관에 적용.
 # 🎯 **굴절 제거** (같은 날 사용자: "굴절 때문에 관찰이 어렵다") —
 #    ior=1.0 이면 광선이 꺾이지 않고 직진 투과라 로봇이 왜곡 없이 보인다.
+# 🎯 **층별 배관 재질** (2026-08-11 사용자 지시: *"floor2 만 배관 색깔을
+#    입힌다 — 그래야 용접 카메라가 잘 보인다"*). 유리는 투명해서 밖에서
+#    로봇을 보기엔 좋지만, 용접 카메라처럼 **관 안에서 보는 시점**에서는
+#    벽 너머가 다 비쳐 결함·용접봉이 묻힌다. floor2 는 실제 배수관처럼
+#    불투명 PVC, floor1(T 자 관찰용)은 유리 유지.
+PVC_FLOORS = {x for x in os.environ.get("PVC_FLOORS", "floor2").split(",")
+              if x}
 # 성능 노브 — 유리(투과)는 RTX 에서 비싸다. PIPE_GLASS=0 이면 불투명 회색.
 PIPE_GLASS = os.environ.get("PIPE_GLASS", "1") == "1"
+# 진단용 — 유리 재질 바인딩 자체를 뺀다(물리 재질 덮어쓰기 혐의 검증)
+GLASS_BIND = os.environ.get("GLASS_BIND", "1") == "1"
 _gl = UsdShade.Material.Define(stage, "/World/Glass")
 _gs = UsdShade.Shader.Define(stage, "/World/Glass/Shader")
 _gs.CreateIdAttr("UsdPreviewSurface")
+# 🎯 **색 있는 무광 반투명** (2026-08-11 사용자 지시) — 안이 비쳐 로봇을
+#    볼 수 있으면서, 색이 있어 벽·바닥과 구분되고, **광택 없음**(거칠기 높음)
+#    이라 반사가 화면을 어지럽히지 않는다. 굴절도 없다(ior 1.0).
+_gc = [float(x) for x in os.environ.get("GLASS_COLOR",
+                                        "0.92,0.94,0.95").split(",")]
 _gs.CreateInput("diffuseColor", Sdf.ValueTypeNames.Color3f).Set(
-    Gf.Vec3f(0.55, 0.58, 0.60))
+    Gf.Vec3f(*_gc))
 _gs.CreateInput("opacity", Sdf.ValueTypeNames.Float).Set(
-    0.25 if PIPE_GLASS else 1.0)
-_gs.CreateInput("roughness", Sdf.ValueTypeNames.Float).Set(0.4)
+    float(os.environ.get("PIPE_OPACITY", 0.06)) if PIPE_GLASS else 1.0)
+_gs.CreateInput("roughness", Sdf.ValueTypeNames.Float).Set(0.05)  # 맑게
+_gs.CreateInput("metallic", Sdf.ValueTypeNames.Float).Set(0.0)
 _gs.CreateInput("ior", Sdf.ValueTypeNames.Float).Set(1.0)
 _gl.CreateSurfaceOutput().ConnectToSource(_gs.ConnectableAPI(), "surface")
+
+# PVC 배수관 — 회색 경질 PVC(KS 배수관). 불투명·약한 광택.
+_pvc = UsdShade.Material.Define(stage, "/World/PipePVC")
+_ps = UsdShade.Shader.Define(stage, "/World/PipePVC/Shader")
+_ps.CreateIdAttr("UsdPreviewSurface")
+# 🚨 회색 PVC(0.68,0.69,0.66)는 **벽·바닥과 톤이 같아 오히려 안 보였다**
+#    (2026-08-11 사용자). 무지개 구분색 때가 더 잘 보였다는 지적대로
+#    **짙은 회색**(사용자 지정) — 밝은 벽·바닥과 명도가 확실히 갈린다.
+#    PIPE_COLOR="r,g,b" 로 즉시 교체 가능.
+_pc = [float(x) for x in os.environ.get("PIPE_COLOR",
+                                        "0.30,0.34,0.36").split(",")]
+_ps.CreateInput("diffuseColor", Sdf.ValueTypeNames.Color3f).Set(
+    Gf.Vec3f(*_pc))
+_ps.CreateInput("roughness", Sdf.ValueTypeNames.Float).Set(0.35)
+_ps.CreateInput("metallic", Sdf.ValueTypeNames.Float).Set(0.0)
+_pvc.CreateSurfaceOutput().ConnectToSource(_ps.ConnectableAPI(), "surface")
+
+
+def pipe_mat(path_or_name):
+    """그 층 배관에 쓸 재질 — PVC_FLOORS 에 든 층은 PVC, 나머지는 유리."""
+    for _f in PVC_FLOORS:
+        if _f and (f"/{_f}/" in str(path_or_name)
+                   or str(path_or_name) == _f):
+            return _pvc
+    return _gl
 
 # ── 배관 적재 — **건물 1회 참조** (v1_3) ────────────────────────────
 print("=" * 78)
@@ -913,9 +954,10 @@ for p in meshes:
     # 배관 조각(비건물): **유리(항상, 굴절 없음)** — 2026-08-11 사용자 확정.
     # 건물 셸은 유리 대신 아래 페인트 단계가 색을 입힌다.
     UsdGeom.Mesh(p).CreateDoubleSidedAttr(True)   # 단면 메시면 밖에서 투명
-    if not _is_bldg:
+    if not _is_bldg and GLASS_BIND:
         UsdShade.MaterialBindingAPI.Apply(p).Bind(
-            _gl, bindingStrength=UsdShade.Tokens.strongerThanDescendants)
+            pipe_mat(_pp0),
+            bindingStrength=UsdShade.Tokens.strongerThanDescendants)
     # 🚨 콜라이더·물리재질은 **활성 층만** — v1_2 규약 그대로. ⚠ 건물 셸도
     #    포함해야 한다: 이 맵은 PartBody(건물+관 외피 융합)가 **실제 관벽
     #    콜라이더**다. 셸을 빼자 관벽이 사라져 로봇 2기가 추락했다
@@ -1111,24 +1153,18 @@ for p in meshes:
         _sz = _hi9 - _lo9
         _thin = min(_sz[0], _sz[1])
         _h_lo, _h_hi = _lo9[2] - _z_fl, _hi9[2] - _z_fl
-        # 판정 문턱은 전부 **실측 크기**로 맞췄다(2026-08-11 페인트 로그):
-        #   샤워헤드 (199,230,60)@h1.69  칸막이 (50,800,1000)  거울 (17,280,350)
-        #   세면대볼 (368,400,377)@h0.72  수납장 (1275,1159,130~390)@h0.1
-        if _thin < 0.08 and _sz[2] > 0.8:
+        # (2026-08-11 사용자 지시로 **무지개 직후 첫 판정 규칙**으로 원복.
+        #  이후에 넣었던 문턱 보정·"부스내벽→타일" 은 걷어냈다.)
+        if _thin < 0.06 and _sz[2] > 0.6 and _h_lo < 0.35:
             _nm9, _mt9 = "샤워칸막이", _MAT_PANEL
         elif _thin < 0.06 and _h_lo > 0.8:
             _nm9, _mt9 = "거울", _MAT_MIRROR
-        elif max(_sz) < 0.30 and _h_lo > 1.2:
+        elif max(_sz) < 0.22 and _h_lo > 1.2:
             _nm9, _mt9 = "샤워헤드", _MAT_CHROME
-        elif _h_hi < 0.60:
+        elif _h_hi < 0.85:
             _nm9, _mt9 = "세면대수납장", _MAT_WOOD
-        elif 0.55 < _h_lo < 1.05 and max(_sz[0], _sz[1]) < 0.60 \
-                and _sz[2] < 0.45:
+        elif _h_lo < 1.05 and _sz[2] < 0.35:
             _nm9, _mt9 = "세면대볼", _MAT_CERAMIC
-        elif max(_sz[0], _sz[1]) > 0.9:
-            # 큰 덩어리는 샤워부스 내벽·칸막이벽이다 — 타일로 (별도 색이면
-            # 화장실에 없는 물건처럼 보인다)
-            _nm9, _mt9 = "부스내벽", _MAT_WALL
         else:
             _nm9, _mt9 = "집기", _MAT_FIX
         _tally[_nm9] = _tally.get(_nm9, 0) + 1
@@ -1140,7 +1176,8 @@ for p in meshes:
                   f"{_h_lo * 1000:.0f}~{_h_hi * 1000:.0f}mm")
     # ⑤ 바인딩 (기본 = 벽)
     UsdShade.MaterialBindingAPI.Apply(p).Bind(_MAT_WALL)
-    _subset_bind(_bm, "paint_pipes", np.flatnonzero(_is_pipe), None)  # 유리
+    _subset_bind(_bm, "paint_pipes", np.flatnonzero(_is_pipe),
+                 pipe_mat(_who))          # 층별 유리/PVC
     _subset_bind(_bm, "paint_floor", np.flatnonzero(_is_fl), _MAT_FLOOR)
     _subset_bind(_bm, "paint_ceil", np.flatnonzero(_is_ce), _MAT_CEIL)
     for _nm9, _fs, _mt9 in _bind:
@@ -1158,8 +1195,13 @@ _WELD_SITES = {}
 for _nm in RUN_NAMES:
     # 🎯 결함 배치 (2026-08-11 사용자 지시): **floor1 없음 / floor2 2곳.**
     #    floor1 은 T 분기 임무(정찰)에 집중하고, 수리 시연은 floor2 가 맡는다.
+    # 🎯 시계각은 **고정**(랜덤 배제)이고, **바퀴를 피하는 각도**다.
+    #    자산 실측: 다리는 전부 시계 **0/120/240°** (앞뒤 줄 오프셋 없음).
+    #    → 각 다리에서 가장 멀리 떨어진 자리는 **60 / 180 / 300°** (60° 여유).
+    #    15°·135°·255° 는 다리에서 15° 뿐이라 바퀴에 바짝 붙어 가렸다(실측).
+    #    서로 반대편이라 영상에서 구분되는 **60°** 와 **300°** 를 쓴다.
     _spec = os.environ.get(f"WELD_SITES_{_nm}",
-                           {"floor1": "", "floor2": "1000@0;2000@90"}.get(
+                           {"floor1": "", "floor2": "1000@60;2000@300"}.get(
                                _nm, ""))
     _cl9 = paths[_nm]
     _sites = []
@@ -1234,6 +1276,8 @@ CM = SON / "camera" / "meshes"
 _res = os.environ.get("CAM_RES", "640x360").lower().split("x")
 CAM_W, CAM_H, CAM_HFOV = int(_res[0]), int(_res[1]), 140.0
 F_PX = (CAM_W / 2.0) / math.radians(CAM_HFOV / 2.0)
+# 용접 카메라 화각 — **여기 한 곳에서만** 정한다(생성부·조준부 공용).
+WELD_CAM_HFOV = float(os.environ.get("WELD_CAM_HFOV", 95.0))
 # 🔑 **이 로봇은 관 축이 로컬 X 다** — 카메라도 ±X 를 본다(앞 세대는 ∓Z 였다).
 #    실측: FrontBody 원점 x=+62mm, 로봇 앞끝 x=+94mm, 뒤끝 −94mm.
 # 🚨 카메라를 본체 안에 박아 두면 안 된다(기록된 사고 — 관벽 화소 0). 앞끝
@@ -1331,6 +1375,10 @@ EXIT_SLOW_H = float(os.environ.get("EXIT_SLOW_H", -0.02))
 #    바닥 +20mm 여유. 하우징 실측: 사각 한 변 ~130(대각 r92)·높이 85 +
 #    판 15(구멍 Ø100) = 바닥면 h100.
 EXIT_RIM_H = float(os.environ.get("EXIT_RIM_H", 0.120))
+# 🎯 **하우징 박스 상단**(2026-08-11 실측): 관구 위 사각 박스(한 변 130 =
+#    벽 65 / 대각 92) 높이 85, 그 위에 판 15(구멍 Ø100). 판 밑면에 편 다리가
+#    걸리므로 **판 10mm 전(=75mm)** 에서 접는다.
+EXIT_BOX_H = float(os.environ.get("EXIT_BOX_H", 0.075))
 # 🚨 끼임 탈출은 임무 방향 **반대로 이만큼만** 물러나는 동작이다 — 물러난 뒤
 #    임무 방향으로 복원한다. 복원이 없으면 복귀 중 끼임 한 번에 코스 끝
 #    판정까지 **한 바퀴를 더 돈다**(2026-08-10 GUI 런 실측: 복귀 라이저
@@ -1346,12 +1394,28 @@ EXIT_PUSH_N = float(os.environ.get("EXIT_PUSH_N", 15.0))
 #    굽힘각을 접선↔몸축으로 재는 자기참조 탓에, 곡관에서 얻은 굽힘(F−48°)이
 #    직선에서도 자기 자신을 지탱하며 관을 가로질러 버티는 **자기쐐기**가
 #    실측됐다(2026-08-10 회귀 런: s=123 끼임 16회, 이탈 1~10mm 정중앙).
-EXIT_STRAIGHT_S = float(os.environ.get("EXIT_STRAIGHT_S", 0.16))
+# 🚨 **원호 시작(164mm)보다 커야 한다** (2026-08-11 실측). 0.16 은 4mm
+#    모자라 원호#0 경계(s=164)가 창 밖에 남았고, 라이저를 다 올라온 로봇이
+#    거기서 "원호 진입" 판정을 받아 굽힘 −40° 를 물었다 → 직선 관에서
+#    자기쐐기 + 오른손 검사 부호 반전 진동으로 s=164↔224 무한 왕복
+#    (탈출 실패의 직접 원인. 다리·마찰·스트로크는 전부 정상이었다).
+#    라이저 전체(관구~원호 시작 164 + 여유)를 덮는 0.20 으로.
+EXIT_STRAIGHT_S = float(os.environ.get("EXIT_STRAIGHT_S", 0.20))
 # 🎯 탈출 마지막 구간 속도 상한(m/s). 마지막 3다리 구간의 정지 원인은
 #    접지 부족이 아니라 **휠 감쇠가 토크 예산을 먹는 것** (2026-08-10 실측:
 #    45mm/s → 감쇠 0.067/0.11N·m, 78mm/s → 0.117 = 예산 초과·견인 0).
 #    20mm/s 면 휠당 견인 10N × 3륜 = 30N > 자중 13.3N.
 EXIT_V = float(os.environ.get("EXIT_V", 0.02))
+# 🎯 **탈출 강제 상승** (2026-08-11 사용자 지시: *"수직곡관에서 한 30mm만
+#    강제로 더 올라가게 만들면 되는 거 아니냐"*). 라이저 탈출은 제어로
+#    풀려던 시도가 반복 실패했고(다리·마찰·스트로크 전부 정상인데 정체),
+#    blueprint 는 어차피 **아는 지형을 못박는** 모드다 — 정체하면 그냥
+#    올려 준다. 0 이면 끔.
+EXIT_ASSIST_M = float(os.environ.get("EXIT_ASSIST_M", 0.030))
+EXIT_ASSIST_S = float(os.environ.get("EXIT_ASSIST_S", 1.2))   # 이만큼 정체하면
+EXIT_ASSIST_T = float(os.environ.get("EXIT_ASSIST_T", 0.6))   # 이 시간에 걸쳐
+EXIT_ASSIST_MOUTH_S = float(os.environ.get("EXIT_ASSIST_MOUTH_S", 0.02))
+EXIT_ASSIST_V = float(os.environ.get("EXIT_ASSIST_V", 0.040))  # 연속 상승 속도
 
 robots = []
 
@@ -2142,20 +2206,52 @@ try:
         except Exception:
             pass
         _tc.set_clipping_range(0.003, 5.0)
-        _tc.set_focal_length(3.0 * F_PX * 1e-6)
+        # 🚨 화각은 **한 곳에서만** 정한다 — 생성부가 env 기본값 60° 를
+        #    따로 읽어 조준 계산(95°)과 어긋나 있었다(2026-08-11: 화면이
+        #    결함 하나로 꽉 찬 원인). 전방 카메라와 같은 어안 설정을 쓴다.
+        _fpx = (CAM_W / 2.0) / math.tan(math.radians(WELD_CAM_HFOV / 2.0))
+        _tc.set_focal_length(3.0 * _fpx * 1e-6)
         _tc.set_horizontal_aperture(3.0 * CAM_W * 1e-6)
+        try:
+            _tc.set_opencv_fisheye_properties(
+                cx=CAM_W / 2, cy=CAM_H / 2, fx=_fpx, fy=_fpx,
+                fisheye=[0.0, 0.0, 0.0, 0.0])
+        except Exception:
+            pass
+        print(f"  {r['name']}: 용접 카메라 화각 {WELD_CAM_HFOV:.0f}° "
+              f"(f={_fpx:.1f}px)")
         r.setdefault("cams", {})["torch"] = _tc
         # 용접부 조명 + 아크 라이트(평소 0, ARC 때 올린다)
         _tl = UsdLux.SphereLight.Define(stage, f"{_bodyp}/torch_cam_light")
-        _tl.CreateIntensityAttr(3.0e5)
+        _tl.CreateIntensityAttr(0.8e6)   # 동연 실측값(4e5 로는 어둡다)
         _tl.CreateRadiusAttr(0.002)
-        UsdGeom.Xformable(_tl).AddTranslateOp().Set(Gf.Vec3d(0.0, 0.0, 0.030))
+        UsdGeom.Xformable(_tl).AddTranslateOp().Set(
+            Gf.Vec3d(0.060, 0.0, 0.020))
         _al = UsdLux.SphereLight.Define(
             stage, f"{r['path']}/{TUNE.get('weld_torch_link', _wr)}/arc_light")
         _al.CreateIntensityAttr(0.0)
         _al.CreateRadiusAttr(0.0015)
         _al.CreateColorAttr(Gf.Vec3f(0.75, 0.85, 1.0))
         r["arc_light"] = _al
+        # 🎯 **용접봉 = 레몬색** (2026-08-11 사용자: 관 색과 비슷해 안 보인다).
+        _lm = UsdShade.Material.Define(stage, "/World/TorchMat")
+        _lms = UsdShade.Shader.Define(stage, "/World/TorchMat/S")
+        _lms.CreateIdAttr("UsdPreviewSurface")
+        _lms.CreateInput("diffuseColor", Sdf.ValueTypeNames.Color3f).Set(
+            Gf.Vec3f(*[float(x) for x in os.environ.get(
+                "TORCH_COLOR", "0.96,0.92,0.30").split(",")]))
+        _lms.CreateInput("roughness", Sdf.ValueTypeNames.Float).Set(0.35)
+        _lms.CreateInput("emissiveColor",
+                         Sdf.ValueTypeNames.Color3f).Set(
+            Gf.Vec3f(0.25, 0.23, 0.05))      # 어두운 관 속에서도 보이게
+        _lm.CreateSurfaceOutput().ConnectToSource(_lms.ConnectableAPI(),
+                                                  "surface")
+        for _tp9 in (TUNE.get("weld_torch_link"), TUNE.get("weld_ring_link")):
+            _pr9 = stage.GetPrimAtPath(f"{r['path']}/{_tp9}") if _tp9 else None
+            if _pr9 and _pr9.IsValid():
+                UsdShade.MaterialBindingAPI.Apply(_pr9).Bind(
+                    _lm,
+                    bindingStrength=UsdShade.Tokens.strongerThanDescendants)
         _ncam += 1
     print(f"[준비] 카메라 {_ncam}대 (어안 {CAM_HFOV:.0f}°, {CAM_W}x{CAM_H}) "
           f"— 이름 <코스>_{{front,weld}}_camera "
@@ -2178,44 +2274,120 @@ except Exception as exc:
 #    움직인다 — 같은 자리에 두면 토치·링이 화면을 꽉 채워 아무것도 안 보인다
 #    (2026-08-11 사용자: "전혀 담지 못해"). → **토치 옆(축 둘레 90°)에서
 #    측면으로** 본다: 용접봉이 벽으로 내려가는 것도, 결함도, 스파크도 한 화면.
-WELD_CAM_SIDE = float(os.environ.get("WELD_CAM_SIDE", 0.030))  # 옆으로
-WELD_CAM_X = float(os.environ.get("WELD_CAM_X", 0.022))        # 앞으로
+# 🚨 몸통 안(반경 30·축 22mm)에 두면 **로봇 제 부품이 시야를 막는다**
+#    (2026-08-11 사용자: "너무 붙어있어서 확인이 안돼"). 관 안에는 반경으로
+#    물러날 자리가 없다(바퀴 40~48 · 관벽 50) → **축방향으로 코 앞까지 빼고**
+#    화각을 좁혀 용접부를 당겨 본다(동연도 같은 취지의 주석을 남겼다).
+WELD_CAM_R = float(os.environ.get("WELD_CAM_R", 0.038))    # (미사용)
+WELD_CAM_OFF = float(os.environ.get("WELD_CAM_OFF", 0.036))   # 원주 90° 옆으로
+WELD_CAM_AX = float(os.environ.get("WELD_CAM_AX", 0.000))      # 중심선 위, 링에서 앞으로
 WELD_CAM_TILT = float(os.environ.get("WELD_CAM_TILT", 0.0))
+WELD_CAM_LIFT = float(os.environ.get("WELD_CAM_LIFT", 0.012))  # (미사용)
+WELD_CAM_CIRC = float(os.environ.get("WELD_CAM_CIRC", 60.0))  # 결함에서 원주각
+# 감시자 시점 — 결함 기준. 결함 반대편으로 물러난 거리 / 관 축 앞쪽 비껴선 거리
+WELD_CAM_BACK7 = float(os.environ.get("WELD_CAM_BACK7", 0.030))
+WELD_CAM_AHEAD7 = float(os.environ.get("WELD_CAM_AHEAD7", 0.075))
+WELD_CAM_ROLL = float(os.environ.get("WELD_CAM_ROLL", 90.0))
 
 
-def aim_weld_cam(r, tip_world, diag=False):
+def weld_tip_world(r):
+    """토치 팁의 월드 위치 — **링의 실제 자세**에서 낸다(결함 방향이 아니라).
+    링이 돌면 이 값이 같이 돌고, 카메라도 따라 돈다."""
+    if r.get("ring_link") is None or r.get("torch_link") is None:
+        return None
+    _e = wrot(r["ring_link"]) @ np.array([0.0, 0.0, 1.0])
+    return wpos(r["torch_link"]) + _e * float(
+        TUNE.get("torch_tip_r0", 0.041))
+
+
+def aim_weld_cam(r, tip_world=None, diag=False):
+    """동연 `aim_torch_camera` 와 **같은 로직** (2026-08-11 사용자 지시:
+    *"용접링 위치만 다르잖아, 그 로직은 그대로 반영할 수 있잖아"*).
+      기준점 = 토치가 실제로 달린 자리(용접링 중심)
+      카메라 = 기준점에서 팁 방향으로 WELD_CAM_R(38mm)
+      광축   = 팁 방향 + 위쪽 0.28(≈16°, 용접점을 화면 아래로) · 롤 90°
+    """
     _cam = r.get("weld_cam")
     if _cam is None or r.get("ring_link") is None:
         return
+    if tip_world is None:
+        tip_world = weld_tip_world(r)
+        if tip_world is None:
+            return
     _Rb = wrot(r["weld_cam_body"])
-    _ref = wpos(r["ring_link"])
-    _e = tip_world - _ref                      # 링 중심 → 팁 (반경 방향)
-    _n = float(np.linalg.norm(_e))
-    if _n < 1e-6:
+    _ref = wpos(r["ring_link"])            # 토치 장착 위치(링 중심)
+    _f = tip_world - _ref
+    _d = float(np.linalg.norm(_f))
+    if _d < 1e-6:
         return
-    _e = _e / _n
-    _ax = _Rb @ np.array([1.0, 0.0, 0.0])      # 관 축(로봇 전방)
-    _side = np.cross(_ax, _e)                  # 토치 옆
-    _ns = float(np.linalg.norm(_side))
-    if _ns < 1e-6:
+    _f = _f / _d
+    _e0 = _f.copy()                        # 링 반경 방향(팁 쪽) — 롤 기준
+    # 🎯 **FPS 구도** (2026-08-11 사용자 레퍼런스): 카메라가 총 **뒤**에
+    #    있어야 총열과 총구, 그리고 그 너머 표적이 한 화면에 들어온다.
+    #    링 중심에서 팁 **반대쪽**으로 물러나고(관 축을 가로질러) 축방향으로
+    #    비껴 서면, 토치 몸통이 화면 앞쪽에 걸리고 팁·관벽이 그 너머로 보인다.
+    # 🚨 **몸체에 파고들면 아무것도 안 보인다** — 동연이 겪은 그 실패와
+    #    같은 증상(사용자: "화면이 너무 확대돼서 아무것도 안 보여").
+    #    반경 32mm·축 50mm 자리는 다리 암(반경 40mm, x 55~75) 사이라 막힌다.
+    #    → **관 축 위, 로봇 코 앞**(축 +100mm, 반경 0)으로 뺀다. 거기서
+    #    뒤돌아보면 앞 디스크(r22)는 12° 만 가리고, 토치(r41~50)는 27° 쪽에
+    #    있어 **총열처럼 화면에 걸린다**. 동연 구조(축방향으로 떨어져 축을
+    #    바라봄)와 같은 관계이고, 자리는 우리 로봇 기하에 맞춘 것이다.
+    # 🚨 **몸통 축으로 곧게 100mm 나가면 곡관에서 관을 뚫는다**
+    #    (2026-08-11 사용자 지적, 옳다). 관 밖으로 나간 카메라는 벽 속을
+    #    보므로 화면이 새까맣거나 극단적 근접이 된다.
+    #    → blueprint 는 중심선을 안다. **카메라를 중심선 위에** 올려
+    #    관 안에 있는 것을 보장한다(곡관에서도 자동으로 휘어 따라간다).
+    # 🎯 **링 평면 옆자리** (2026-08-11, 저장 프레임 실측으로 확정).
+    #    앞쪽(축 110mm)에서 보면 시선이 x≈65 에서 반경 34mm 를 지나는데
+    #    거기를 **다리 암이 몸통(r16)→바퀴(r40) 로 가로지른다** → 렌즈가
+    #    통째로 막혀 화면이 균일한 회색이었다(저장 프레임 확인).
+    #    로봇에서 유일하게 트인 곳은 **링 평면(x≈0)** 이다 — 몸통 다리는
+    #    x=±24 두 줄이라 그 사이가 비어 있다. 거기서 토치를 **옆(원주
+    #    방향 90°)** 에서 본다: 시선이 다리 줄을 지나지 않는다.
+    # 🎯 **링 평면 옆자리** (2026-08-11 사용자 확정: 결함 기준 감시자 시점은
+    #    로봇 코앞이라 앞 디스크가 화면을 채웠다 — 직전 방식이 낫다).
+    #    바퀴 가림은 카메라를 옮겨서가 아니라 **결함 각도를 다리 사이로**
+    #    두어 피한다(사용자 제안 — 90° 결함이 딱 안 가렸다).
+    _axw = _Rb @ np.array([1.0, 0.0, 0.0])
+    _sidew = np.cross(_axw, _e0)
+    _ns9 = float(np.linalg.norm(_sidew))
+    if _ns9 < 1e-6:
         return
-    _side = _side / _ns
-    _pos_w = _ref + _side * WELD_CAM_SIDE + _ax * WELD_CAM_X
-    _f = tip_world - _pos_w                    # 팁을 정면으로
-    _f = _f / max(float(np.linalg.norm(_f)), 1e-9)
-    if WELD_CAM_TILT:
-        _f = _f + _e * WELD_CAM_TILT
-        _f /= np.linalg.norm(_f)
-    _up = _e                                   # 화면 위 = 관벽 쪽
+    # 🎯 카메라의 **원주 각도**를 결함에서 +90° → +45° 로 (2026-08-11
+    #    사용자 지적: 다리가 120° 간격이면 그 사이를 쓰면 되는데 왜 가장
+    #    자리냐). 90° 를 쓰면 결함~카메라 구간이 다리 사이(120°)를 거의
+    #    다 먹어 결함이 가장자리로 밀린다. 45° 면 카메라가 **다리 사이
+    #    정중앙**(결함 15°→카메라 60°, 255°→300°)에 서고 시선 구간도
+    #    절반이라 여유가 두 배다. **결함 각도는 그대로 둔다.**
+    _th7 = math.radians(WELD_CAM_CIRC)
+    _dirc = _e0 * math.cos(_th7) + (_sidew / _ns9) * math.sin(_th7)
+    _pos_w = (_ref + _dirc * WELD_CAM_OFF + _axw * WELD_CAM_AX)
+    _w7 = r.get("weld")
+    if _w7 is not None:                       # 용접 중엔 팁·결함 중간 조준
+        _st7 = _w7["site"]
+        tip_world = (np.asarray(tip_world)
+                     + _st7["pos"] + _st7["dir"] * PIPE_IR) * 0.5
+    _f = tip_world - _pos_w                    # 팁을 향해 다시 겨눈다
+    _f /= max(float(np.linalg.norm(_f)), 1e-9)
+    # 🎯 **링과 같이 돈다** (2026-08-11 사용자 확인): 화면의 "위" 를 월드 Z
+    #    로 고정하면 링이 90° 돌 때 토치가 화면에서 옆으로 미끄러진다.
+    #    위쪽 기준을 **링의 반경 방향 반대**로 잡으면, 링이 어디로 돌든
+    #    토치·용접점이 화면 **아래쪽 같은 자리**에 온다(총을 든 시점처럼).
+    _up = -_e0
+    if abs(float(np.dot(_f, _up))) > 0.95:     # 시선과 겹치면 축으로 대체
+        _up = _Rb @ np.array([1.0, 0.0, 0.0])
+    _f = _f + _up * WELD_CAM_TILT          # 광축을 위로 살짝(용접점을 아래로)
+    _f /= np.linalg.norm(_f)
     _rt = np.cross(_f, _up)
-    _nr = float(np.linalg.norm(_rt))
-    if _nr < 1e-6:
-        return
-    _rt /= _nr
+    _rt /= max(float(np.linalg.norm(_rt)), 1e-9)
     _u2 = np.cross(_rt, _f)
-    # USD 카메라: −Z 가 시선, +Y 가 화면 위. wrot 은 **열 기저**이므로
-    # 열로 쌓아 로컬로 돌린 뒤, Gf(행 기저)에는 전치해서 넣는다.
-    _Ml = _Rb.T @ np.column_stack([_rt, _u2, -_f])
+    _rl = math.radians(WELD_CAM_ROLL)      # 광축 롤
+    _c, _sn = math.cos(_rl), math.sin(_rl)
+    _rt2 = _rt * _c + np.cross(_f, _rt) * _sn
+    _u3 = _u2 * _c + np.cross(_f, _u2) * _sn
+    # USD 카메라: −Z 시선, +Y 화면 위. wrot 은 열 기저 → Gf(행 기저)에 전치.
+    _Ml = _Rb.T @ np.column_stack([_rt2, _u3, -_f])
     _M = Gf.Matrix3d(*[float(v) for v in _Ml.T.reshape(-1)])
     _q = Gf.Rotation(_M.ExtractRotation()).GetQuat()
     _cam.set_local_pose(
@@ -2224,6 +2396,54 @@ def aim_weld_cam(r, tip_world, diag=False):
                               *[float(v) for v in _q.GetImaginary()]]),
         camera_axes="usd")
     if diag:
+        # 📐 화면 좌표 계측 — 팁·결함이 **화면 안에 있는가**를 각도로 낸다.
+        #    화각 절반보다 크면 프레임 밖이다(추측 대신 숫자로 가린다).
+        _Rc = wrot(_cam.prim)
+        _vw = _Rc @ np.array([0.0, 0.0, -1.0])     # 시선
+        _rw = _Rc @ np.array([1.0, 0.0, 0.0])      # 화면 오른쪽
+        _uw = _Rc @ np.array([0.0, 1.0, 0.0])      # 화면 위
+        _cp = wpos(_cam.prim)
+        _hf = WELD_CAM_HFOV / 2.0
+        _vf = math.degrees(math.atan(math.tan(math.radians(_hf))
+                                     * CAM_H / CAM_W))
+        _tgt = [("팁", tip_world)]
+        _w9 = r.get("weld")
+        if _w9 is not None:
+            _tgt.append(("결함", _w9["site"]["pos"]
+                         + _w9["site"]["dir"] * PIPE_IR))
+        _tgt.append(("링", _ref))
+        _msg = []
+        for _nm, _pt in _tgt:
+            _d9 = _pt - _cp
+            _z9 = float(np.dot(_d9, _vw))
+            _x9 = float(np.dot(_d9, _rw))
+            _y9 = float(np.dot(_d9, _uw))
+            if _z9 <= 1e-6:
+                _msg.append(f"{_nm}=뒤쪽(안보임)")
+                continue
+            _ax9 = math.degrees(math.atan2(_x9, _z9))
+            _ay9 = math.degrees(math.atan2(_y9, _z9))
+            _in = "안" if (abs(_ax9) < _hf and abs(_ay9) < _vf) else "**밖**"
+            _msg.append(f"{_nm}={float(np.linalg.norm(_d9))*1000:.0f}mm "
+                        f"좌우{_ax9:+.0f}°/상하{_ay9:+.0f}° 프레임{_in}")
+        # 시선이 로봇 축에 최근접하는 반경 — 22mm(앞 디스크)보다 작으면
+        # 디스크가 시야를 막는다. 40mm 를 넘으면 다리 암에 걸린다.
+        _a0 = wpos(r["weld_cam_body"])
+        _ah = _Rb @ np.array([1.0, 0.0, 0.0])
+        _seg = tip_world - _cp
+        _rmin = 1e9
+        for _t9 in np.linspace(0.0, 1.0, 21):
+            _q9 = _cp + _seg * _t9
+            _v9 = _q9 - _a0
+            _rr = float(np.linalg.norm(_v9 - _ah * float(np.dot(_v9, _ah))))
+            _xx = float(np.dot(_v9, _ah))
+            if -0.030 < _xx < 0.090:          # 로봇 몸통이 있는 축 구간
+                _rmin = min(_rmin, _rr)
+        _blk = ("디스크가 가림" if _rmin < 0.022 else
+                "다리에 걸림" if _rmin > 0.040 else "트임")
+        print(f"           [용접캠] 화각 {WELD_CAM_HFOV:.0f}°(반 {_hf:.0f}°) "
+              f"세로반 {_vf:.0f}° | " + " | ".join(_msg)
+              + f" | 시선 최근접반경 {_rmin * 1000:.0f}mm → {_blk}")
         # 자가검증 — 조준이 실제로 팁을 향하는가(규약 실수는 여기서 드러난다)
         _vw = wrot(_cam.prim) @ np.array([0.0, 0.0, -1.0])
         _to = tip_world - wpos(_cam.prim)
@@ -2247,6 +2467,9 @@ if SPARK_RATE > 0 and not HEADLESS:
     try:
         sys.path.insert(0, str(SON))
         from welder import spark_fx as _sfx                 # noqa: E402
+        _sfx._R *= float(os.environ.get("SPARK_SCALE", 1.6))
+        _sfx._L *= float(os.environ.get("SPARK_SCALE", 1.6))
+        _sfx._BALL_R *= float(os.environ.get("SPARK_SCALE", 1.6))
         _sfx._STAGES = tuple(
             (nm, rgb, frac, SPARK_GAIN * mul)
             for (nm, rgb, frac, _g), mul in zip(
@@ -2459,6 +2682,11 @@ def leg_max_ext(r):
     _b = float(getattr(_c, "bore_ref_mm", 0.0) or 0.0) / 1000.0 if _c else 0.0
     if _b <= 0.0:
         _b = PIPE_IR                      # 판정 전에는 설계 DN100 으로 본다
+    # 🎯 **거름망 하우징 안에서는 상한을 푼다** (2026-08-11 실측 규명).
+    #    blueprint 는 관경 판정이 없어 DN100 으로 가정 → 상한 12mm → 도달
+    #    40+12+8 = 60mm. 그런데 하우징 사각 벽은 **65mm**(대각 92) 라
+    #    **애초에 닿을 수가 없었다** — 탈출이 막히던 진짜 이유가 이것이다.
+    #    하우징 구간(exit_box)에서는 스트로크 전량을 쓴다.
     _cap = (_b - WHEEL_R) - TUNE["wheel_center_mm"] / 1000.0 + LEG_CAP_MARGIN
     return float(min(max(_cap, 0.002), PISTON_STROKE))
 
@@ -3998,6 +4226,8 @@ FAIL_S = float(os.environ.get("FAIL_S", 5.0))
 STALL_S = float(os.environ.get("STALL_S", 40.0))
 STALL_WIN = float(os.environ.get("STALL_WIN", 0.030))
 WELD_ARC_S = float(os.environ.get("WELD_ARC_S", 4.0))   # 아크 유지 시간
+WELD_LEAD = float(os.environ.get("WELD_LEAD", 0.020))   # 넉넉히 미리 정지
+WELD_FINE_M = float(os.environ.get("WELD_FINE_M", 0.0015))  # 미세 정렬 허용
 _last_report = 0
 
 tick("첫 물리 스텝 진입 — 여기서부터 로봇이 움직인다")
@@ -4098,6 +4328,59 @@ while True:
         #  "필요한 것들만 남겼으니 분기처리는 철회". 로봇당 카메라가 1~2대뿐
         #  이라 켜 두는 편이 단순하고, 주행 중 화면이 비는 문제도 없어진다.)
 
+        # 🎯 **탈출 강제 상승** (위 EXIT_ASSIST_* 주석 — 사용자 지시).
+        #    복귀 국면에서 라이저 구간(s < EXIT_STRAIGHT_S)에 있는데
+        #    EXIT_ASSIST_S 초 동안 순진행이 없으면, 관 축 방향(위)으로
+        #    EXIT_ASSIST_M 만큼 EXIT_ASSIST_T 초에 걸쳐 밀어 올린다.
+        if (EXIT_ASSIST_M > 0 and r.get("phase") in ("BACK", "EXIT")
+                and s_now < EXIT_STRAIGHT_S and r.get("art") is not None):
+            _as = r.setdefault("assist", {"s": s_now, "mark": step, "n": 0,
+                                          "left": 0.0})
+            if s_now < _as["s"] - 0.002:            # 순진행 중 — 감시 리셋
+                _as["s"], _as["mark"] = s_now, step
+            # 🎯 **관구부터는 연속 상승** (2026-08-11 실측): 하우징 안은
+            #    짚을 벽이 없어(뜬다리 9개) 30mm 씩 끊어 올리면 그때마다
+            #    중력이 되돌린다 — 12회 반복해도 제자리(관 밖 33mm).
+            #    관구(s≈0)에 닿으면 완전 탈출까지 **쉬지 않고** 밀어 올린다.
+            if s_now <= EXIT_ASSIST_MOUTH_S:
+                _pw, _qw = r["art"].get_world_pose()
+                _up = -r["cl"].tangent(0)
+                r["art"].set_world_pose(
+                    position=np.asarray(_pw)
+                    + _up * (EXIT_ASSIST_V / PHYSICS_HZ), orientation=_qw)
+                _as["mark"] = step
+                if not _as.get("cont"):
+                    _as["cont"] = True
+                    print(f"[{r['name']:8s}] ⬆ 관구 도달 — 완전 탈출까지 "
+                          f"연속 상승 {EXIT_ASSIST_V * 1000:.0f}mm/s")
+            elif _as["left"] > 0.0:                 # 상승 중
+                _d = min(_as["left"],
+                         EXIT_ASSIST_M / max(EXIT_ASSIST_T * PHYSICS_HZ, 1))
+                _pw, _qw = r["art"].get_world_pose()
+                _up = -r["cl"].tangent(0)           # 관구 바깥(위) 방향
+                r["art"].set_world_pose(
+                    position=np.asarray(_pw) + _up * _d, orientation=_qw)
+                _as["left"] -= _d
+                if _as["left"] <= 1e-9:
+                    _as["s"], _as["mark"] = s_now, step
+                    print(f"[{r['name']:8s}] ⬆ 강제 상승 "
+                          f"{EXIT_ASSIST_M * 1000:.0f}mm 완료 "
+                          f"({_as['n']}회째, s={s_now * 1000:.0f}mm)")
+            elif step - _as["mark"] > EXIT_ASSIST_S * PHYSICS_HZ:
+                _as["left"] = EXIT_ASSIST_M
+                _as["n"] += 1
+                print(f"[{r['name']:8s}] ⬆ 탈출 정체 "
+                      f"{EXIT_ASSIST_S:.1f}s — 강제 상승 "
+                      f"{EXIT_ASSIST_M * 1000:.0f}mm 시작 "
+                      f"(s={s_now * 1000:.0f}mm, {_as['n']}회째)")
+
+        # 🎥 **용접 카메라는 항상 팁을 본다** (2026-08-11 사용자 지시).
+        #    주행 중에도 링 자세를 따라 돌므로, 링이 결함 쪽으로 돌면 화면도
+        #    같이 돈다. 4스텝(60Hz)마다면 화면상 충분하다.
+        if r.get("weld_cam") is not None and r["t"] % 4 == 0:
+            aim_weld_cam(r, diag=(os.environ.get("WELD_CAM_DIAG") == "1"
+                                  and r["t"] % int(2 * PHYSICS_HZ) == 0))
+
         if r["state"] == "SETTLE":
             # 🚨 안착 중에도 예압을 **매 스텝 다시 써야** 한다 — reset 뒤의
             #    `set_joint_positions()` 가 드라이브 타깃을 지웠기 때문이다.
@@ -4163,9 +4446,12 @@ while True:
                 _sr9 = s_now
                 if r.get("ring_link") is not None:
                     _sr9 = r["cl"].nearest(wpos(r["ring_link"]), s_now)[0]
+                # 🎯 감속 오버슈트(실측 +8~9mm)만큼 **미리** 세운다 —
+                #    그래야 토치 끝이 결함 바로 위에 선다(2026-08-11 사용자:
+                #    "용접봉 끝 위치가 결함과 정확히 안 맞는다").
                 for _site in r["weld_sites"]:
-                    if not _site["done"] and _sr9 >= _site["s"]:
-                        r["weld"] = _w = dict(site=_site, st="ALIGN",
+                    if not _site["done"] and _sr9 >= _site["s"] - WELD_LEAD:
+                        r["weld"] = _w = dict(site=_site, st="CREEP",
                                               t0=r["t"], ok_t=0,
                                               sign=1.0, err0=None)
                         print(f"[{r['name']:8s}] 🔧 결함 도달 s="
@@ -4182,12 +4468,10 @@ while True:
                         break
             if _w is not None:
                 _site = _w["site"]
-                if r.get("weld_cam") is not None and r["t"] % 4 == 0:
-                    aim_weld_cam(r, wpos(r["torch_link"])
-                                 + _site["dir"]
-                                 * float(TUNE.get("torch_tip_r0", 0.041)),
-                                 diag=(r["t"] % int(2 * PHYSICS_HZ) == 0))
-                drive(r, 0.0)
+                _creep = (_w["st"] == "CREEP")
+                # (조준은 아래 주행 루프에서 **매 틱 항상** 한다)
+                if not _creep:
+                    drive(r, 0.0)
                 if LEG_FORCE:
                     _fi, _fv = force_legs(r)
                     if _fi:
@@ -4196,7 +4480,46 @@ while True:
                 _qj = np.asarray(r["art"].get_joint_positions())
                 _qr = float(_qj[r["ring_dof"][0]])
                 _qt = float(_qj[r["torch_dof"][0]])
-                if _w["st"] == "ALIGN":
+                if _w["st"] == "CREEP":
+                    # 🎯 **미세 정렬** (2026-08-11): 감속 오버슈트가 4~18mm 로
+                    #    들쭉날쭉해 고정 선행보정으로는 못 맞춘다(실측).
+                    #    멈춘 뒤 저속으로 기어 **용접링 s = 결함 s** 를 맞춘다.
+                    #    이게 맞아야 팁이 결함 정중앙에 서고, 결함(r7)이
+                    #    팁(r2) 둘레로 빨갛게 드러난다(카메라에 담기는 조건).
+                    # 🚨 중심선 s 는 표본 간격(13mm)으로 **양자화**돼 있어
+                    #    오차가 −17.7 → +8.4 → +21.5 로 뛴다(실측) — 1.5mm
+                    #    수렴이 원리적으로 불가능했다. 축오차는 **결함 지점의
+                    #    접선에 투영**해 연속값으로 잰다.
+                    _i8 = int(np.argmin(np.abs(r["cl"].s - _site["s"])))
+                    _tg8 = r["cl"].tangent(_i8)
+                    _er8 = float(np.dot(wpos(r["ring_link"]) - _site["pos"],
+                                        _tg8))
+                    _sr8 = _site["s"] + _er8
+                    if abs(_er8) < WELD_FINE_M:
+                        _w["st"], _w["t0"] = "ALIGN", r["t"]
+                        print(f"[{r['name']:8s}] 🔧 미세 정렬 완료 — 축오차 "
+                              f"{_er8 * 1000:+.1f}mm")
+                    elif r["t"] - _w["t0"] > 6.0 * PHYSICS_HZ:
+                        _w["st"], _w["t0"] = "ALIGN", r["t"]
+                        print(f"[{r['name']:8s}] ⚠ 미세 정렬 시한 — 축오차 "
+                              f"{_er8 * 1000:+.1f}mm 로 진행")
+                    else:
+                        if (r["t"] - _w["t0"]) % int(0.5 * PHYSICS_HZ) == 0:
+                            print(f"           [미세] 축오차 "
+                                  f"{_er8 * 1000:+6.1f}mm  링s "
+                                  f"{_sr8 * 1000:.1f}  목표 "
+                                  f"{_site['s'] * 1000:.1f}")
+                        # 🚨 바퀴 저속 기기는 **정지 마찰에 막힌다**(실측:
+                        #    8초에 2mm, 축오차 −17.7mm 로 시한 초과).
+                        #    탈출 강제 상승과 같은 방식으로 **관 축을 따라
+                        #    직접** 옮겨 오차를 없앤다(blueprint 규약이다).
+                        _st8 = min(abs(_er8), 0.030 / PHYSICS_HZ)
+                        _pw8, _qw8 = r["art"].get_world_pose()
+                        r["art"].set_world_pose(
+                            position=np.asarray(_pw8)
+                            + _tg8 * math.copysign(_st8, -_er8),
+                            orientation=_qw8)
+                elif _w["st"] == "ALIGN":
                     # 링 서보 — 토치 방사방향(링 로컬 +Z)을 결함 방향에.
                     # 부호는 자가교정(1초 뒤 오차가 커져 있으면 반전) —
                     # 링 축 규약을 자산에 묻지 않는다.
@@ -4212,10 +4535,40 @@ while True:
                             and abs(_ang) > _w["err0"] + 0.05:
                         _w["sign"] = -_w["sign"]
                         _w["err0"] = abs(_ang)
-                    if abs(_ang) < math.radians(3.0):
+                    if abs(_ang) < math.radians(1.2):
                         _w["ok_t"] += 1
                         if _w["ok_t"] >= int(0.5 * PHYSICS_HZ):
                             _w["st"], _w["t0"] = "EXTEND", r["t"]
+                            # 🎯 **결함을 토치에 맞춘다** (2026-08-11 사용자
+                            #    지시 — 훨씬 간단하고 확실하다). 로봇이 관
+                            #    중심에서 ~12mm 치우쳐 서기 때문에 토치를
+                            #    결함에 맞추려면 이탈 보정·행정 확장이 줄줄이
+                            #    필요했다. 결함은 우리가 놓는 프림이므로
+                            #    **토치가 실제로 닿을 자리로 옮긴다**.
+                            _snap = wpos(r["torch_link"]) + _e * float(
+                                TUNE.get("torch_tip_r0", 0.041))
+                            _rl = _snap - _site["pos"]
+                            _axl = float(np.dot(_rl, _site["tan"]))
+                            _rv = _rl - _site["tan"] * _axl
+                            _nv = float(np.linalg.norm(_rv))
+                            if _nv > 1e-6:
+                                _u = _rv / _nv
+                                _rot = Gf.Rotation(
+                                    Gf.Vec3d(0, 0, 1),
+                                    Gf.Vec3d(*[float(v) for v in _u]))
+                                for _pk, _off in (("prim_d", 0.0006),
+                                                  ("prim_b", 0.0012)):
+                                    _c = (_site["pos"] + _site["tan"] * _axl
+                                          + _u * (PIPE_IR - _off))
+                                    _xf = UsdGeom.Xformable(_site[_pk])
+                                    _xf.ClearXformOpOrder()
+                                    _xf.AddTransformOp().Set(
+                                        Gf.Matrix4d().SetRotate(_rot)
+                                        * trans(float(_c[0]), float(_c[1]),
+                                                float(_c[2])))
+                                _site["dir"] = _u          # 이후 계산도 일치
+                                print(f"[{r['name']:8s}] 🎯 결함을 토치 자리로 "
+                                      f"스냅 (축 {_axl * 1000:+.1f}mm)")
                             print(f"[{r['name']:8s}] 🔧 정렬 완료 (오차 "
                                   f"{math.degrees(_ang):+.1f}°) — 토치 신장")
                     else:
@@ -4263,6 +4616,28 @@ while True:
                                          _w["qcmd"] + 0.006 / PHYSICS_HZ)
                         _set_pos(r, [_w["qcmd"]], [r["torch_dof"][0]])
                 elif _w["st"] == "ARC":
+                    # 📸 용접 순간 프레임 저장 (WELD_CAM_SHOT=1) — 화면을
+                    #    말로 추측하지 않고 직접 본다.
+                    if (os.environ.get("WELD_CAM_SHOT") == "1"
+                            and not _w.get("shot")
+                            and r["t"] - _w["t0"] > int(0.7 * PHYSICS_HZ)):
+                        _w["shot"] = True
+                        aim_weld_cam(r, diag=True)   # 저장 순간 수치도 남긴다
+                        try:
+                            _c9 = r.get("cams", {}).get("torch")
+                            _im = _c9.get_rgba() if _c9 else None
+                            if _im is not None and getattr(_im, "size", 0):
+                                import imageio.v2 as _iio
+                                _fn = (f"/tmp/claude-1000/-home-rokey/"
+                                       f"3df81582-84b7-4a5d-a0a5-"
+                                       f"8700bab76459/scratchpad/"
+                                       f"weldcam_{r['name']}_"
+                                       f"{_site['clock']:.0f}.png")
+                                _iio.imwrite(_fn, np.asarray(
+                                    _im)[:, :, :3].astype(np.uint8))
+                                print(f"           [용접캠] 📸 저장 {_fn}")
+                        except Exception as _pe:
+                            print(f"           [용접캠] 저장 실패 {_pe}")
                     if r.get("sparks") is not None:
                         _tipw = wpos(r["torch_link"]) + _site["dir"] * float(
                             TUNE.get("torch_tip_r0", 0.041))
@@ -4801,10 +5176,11 @@ while True:
                 # 🎯 활성 카메라 1대 규약 (2026-08-11 사용자 확정):
                 #    전진→front / 후진→rear / 정렬~아크→torch. 렌더·인코딩
                 #    비용이 로봇당 1대 몫으로 준다 (2기여도 최대 2대).
-                _role = ("torch" if _wst in ("ALIGN", "EXTEND", "ARC")
-                         else "front")
-                if _role not in r.get("cams", {}):
-                    _role = next(iter(r.get("cams", {})), "front")
+                # 🎥 **발행 분기 철회** (2026-08-11 사용자 지시) — 카메라가
+                #    로봇당 1대뿐이라 "상황에 맞는 것만" 골라 봐야 의미가
+                #    없다. 있는 카메라를 **항상** 내보내고, 웹은 두 토픽을
+                #    계속 구독한다. `_role` 은 이제 보고용 이름일 뿐이다.
+                _role = next(iter(r.get("cams", {})), "front")
                 if r["dead"]:
                     _st9 = "DEAD"
                 elif _wst in ("ALIGN", "EXTEND"):
@@ -4833,17 +5209,16 @@ while True:
                     pos=_p9, cam=_role)
                 if not CAMERAS:
                     continue
-                _rp.publish_camera(only=_role)
+                _rp.publish_camera()          # 등록된 카메라 전부(1대)
                 _dy = r.get("dy_pub")
                 if _dy is None:
                     continue
                 from sensor_msgs.msg import CompressedImage as _CI9
                 from std_msgs.msg import String as _S9
-                _dy["which"].publish(_S9(data=_role + "_camera"))
-                # 용접 국면에는 동연 active_cam rgb + 판정 JSON 도 발행
-                if _wst is None:
-                    continue
-                _tc9 = next((c for c in _rp.cams if c[0] == "torch"), None)
+                _dy["which"].publish(_S9(data=f"{r['name']}_{_role}_camera"))
+                # 동연 active_cam rgb + 판정 JSON — **항상** 발행(위 철회와
+                # 같은 이유). 판정은 용접 국면에만 뜻이 있으므로 그때만 붙인다.
+                _tc9 = next((c for c in _rp.cams if c[0] == _role), None)
                 if _tc9 is None:
                     continue
                 try:
@@ -4857,7 +5232,7 @@ while True:
                     _im9.format = "jpeg"
                     _im9.data = _rosb.codec.rgb_to_jpeg(_a9)
                     _dy["rgb"].publish(_im9)
-                    if _DY_FINDERS is not None:
+                    if _DY_FINDERS is not None and _wst is not None:
                         _dep9 = (_tc9[2].get_data()
                                  if _tc9[2] is not None else None)
                         # 🚨 인자 순서가 원본과 다르다 — 키워드로만 부른다
