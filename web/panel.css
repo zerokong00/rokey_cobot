@@ -171,6 +171,33 @@ code,.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
 .cmdgrp .btns button{padding:6px 10px;font-size:12.5px}
 .cmdgrp .b-run{min-width:8em}
 .cmdgrp .toast{margin-top:7px;font-size:12px}
+/* 🔑 가운데 칸 글자·버튼 크기는 **`--fs` 한 곳**에서 정한다. 표·배지·제목·
+   버튼이 규칙 여섯 개에 흩어져 있어 따로 키우면 배지만 작게 남는다.
+   🔑 버튼 여백과 `.b-run` 폭이 **em** 이라 글자를 키우면 버튼이 먼저 커진다 —
+   글자가 버튼을 넘어서지 않는 것은 이 단위 덕분이다(px 로 되돌리지 말 것). */
+/* 🔑 가운데 칸의 크기 손잡이는 **둘**이다 (2026-08-11):
+     --fs       보통 UI — 카드 제목 · 지령 버튼 · 묶음 이름
+     --fs-stat  결함 현황 표 **하나뿐** — 떨어져서 읽는 표제 숫자라 크다
+   하나로 묶었더니 표를 키울 때마다 지령 버튼이 같이 커져 칸 밖으로 밀렸다.
+   손가락으로 누르는 것과 눈으로 읽는 것은 적정 크기가 다르다.
+   🔑 버튼 여백과 `.b-run` 폭이 **em** 이라 글자를 키우면 버튼이 먼저 커진다 —
+   글자가 버튼을 넘어서지 않는 것은 이 단위 덕분이다(px 로 되돌리지 말 것). */
+/* 🚨 `--fs-stat` 은 **한 화면에 세 카드가 다 들어가는 상한**이 있다. 가운데
+   칸은 `.m3` 가 창 높이에 묶여 있고 넘치면 스크롤이라, 키우면 지령 버튼이
+   먼저 화면 밖으로 내려간다("눌러야 할 것" 이 안 보인다). 실측 기준:
+   1080p 브라우저에서 쓸 수 있는 높이가 ≈850px 인데, 22px 이면 상태 5줄 +
+   결함 3줄 + 버튼 세 묶음이 ≈780px 다. 24px 을 넘기면 스크롤이 생긴다. */
+.m3-mid{--fs:15px;--fs-stat:22px}
+.m3-mid .card h2{font-size:calc(var(--fs) + 3px)}
+.m3-mid .cmdgrp .glab{font-size:var(--fs)}
+.m3-mid .cmdgrp .btns button{font-size:var(--fs);padding:.45em .85em}
+/* 🚨 표는 `th`·`td` 를 **직접** 겨눠야 한다. 이 파일 아래쪽의 일반
+   `th{font-size:12px}` 이 특이도와 무관하게 **상속을 이기기** 때문이다
+   (직접 매칭이 상속보다 항상 강하다). `.fstat` 에만 걸면 값과 `1층/2층` 만
+   커지고 `검출`·`수리 완료` 라벨은 12px 로 남는다 — 실제로 그렇게 보였다. */
+.m3-mid .fstat,.m3-mid .fstat th,.m3-mid .fstat td{font-size:var(--fs-stat)}
+.m3-mid .fstat thead th{font-size:calc(var(--fs-stat) - 4px)}
+.m3-mid .pill{font-size:calc(var(--fs-stat) - 6px)}
 /* 오른쪽 카메라 칸 — 제목 줄을 얇게 (그림에 자리를 준다) */
 .camcard h2{margin-bottom:8px}
 .camcard .camwhen{font-weight:400;text-transform:none;letter-spacing:0}
@@ -238,7 +265,12 @@ button:disabled:hover{background:var(--panel2)}
 .b-run{min-width:9.5em}
 .b-run.go{border-color:#2f6a4a;color:#8ed9ae}
 .b-forward{border-color:#2f5a7a;color:#8ec4e0}
-.b-estop{border-color:#7a3030;color:#f09090}
+/* ⛔ 비상정지 ↔ 🔓 해제 — **버튼 하나가 둘을 겸한다**(handling.js). 비상정지
+   중이면 `b-release` 가 얹혀 노랑이 된다.
+   🚨 **순서가 규칙이다.** 두 클래스가 같이 붙는데 특이도가 같으므로 뒤에 오는
+   `.b-release` 가 이긴다 — 위아래를 바꾸면 해제 얼굴이 빨갛게 남는다.
+   `.b-run` 과 같은 이유로 폭을 잡아 둔다 — 글자 수가 바뀌어도 옆이 안 밀린다. */
+.b-estop{border-color:#7a3030;color:#f09090;min-width:8em}
 .b-release{border-color:#6a5a2a;color:#e0c07a}
 input[type=range]{vertical-align:middle;accent-color:var(--accent)}
 #speedv{display:inline-block;min-width:5.5em;font-variant-numeric:tabular-nums}

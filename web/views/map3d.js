@@ -488,10 +488,11 @@ function loadMesh() {
 // ── 페이지 ───────────────────────────────────────────────────
 // 화면은 **세 칸**이다 (ref_img/web_ui.jpg):
 //   왼쪽   3D 맵 (제일 넓다 — 여기가 주인공이다)
-//   가운데 층별 상태 표 · 결함 현황 · 임무 지령 버튼
+//   가운데 로봇 상태 → 결함 현황 → 임무 지령 (위에서 아래로 이 순서다:
+//          지금 뭘 하는지 → 그 결과로 쌓인 숫자 → 내가 누를 것)
 //   오른쪽 카메라 두 칸 (위가 2층 / 아래가 1층 — 건물 순서대로)
 //
-// 🔑 가운데·오른쪽 부속은 **전부 남의 모듈을 끼운다** — 상태 표는
+// 🔑 가운데·오른쪽 부속은 **전부 남의 모듈을 끼운다** — 두 표는
 //    views/status.js, 버튼은 views/handling.js 의 `mountButtons`, 카메라는
 //    views/camera.js 의 `mountCam`. 같은 것을 여기에 또 만들면 조종석과
 //    이 화면이 서로 다른 말을 하게 된다.
@@ -535,7 +536,7 @@ export function mount(el) {
   const ck = el.querySelector('#m-ck');
   const labels = el.querySelector('#labels');
 
-  // ── 가운데 칸 — 상태 표 · 결함 현황 · 지령 버튼 ───────────────
+  // ── 가운데 칸 — 로봇 상태 · 결함 현황 · 임무 지령 ─────────────
   const offPanels = mountFloorPanels(el.querySelector('#m-state'),
                                      el.querySelector('#m-defect'));
   const cmdBox = el.querySelector('#m-cmd');
@@ -552,10 +553,13 @@ export function mount(el) {
   // 🔑 **두 대면 "전체" 를 맨 위에 둔다.** 층마다 프로세스가 따로라 기동
   //    시각이 다른데, `--wait` 로 세워 두고 이 버튼으로 같은 순간에 출발시킨다.
   //    (조종석 페이지가 꺼져 있으므로 여기가 유일한 자리다.)
-  if (store.robots.length > 1)
-    mountAllButtons(group('전체'), {compact: true, toast: cmdToast});
+  // 🔑 `mountAllButtons` 도 이제 해제 함수를 돌려준다 — 전체 비상정지 버튼이
+  //    상태를 따라 ⛔↔🔓 로 바뀌느라 bus 를 잡기 때문이다. 반드시 받아 둘 것.
+  const offAll = store.robots.length > 1
+    ? mountAllButtons(group('전체'), {compact: true, toast: cmdToast}) : null;
   const offBtns = store.robots.map(r =>
     mountButtons(group(r.label), r, {compact: true, toast: cmdToast}));
+  if (offAll) offBtns.push(offAll);
   if (!store.robots.length)
     cmdBox.innerHTML = '<div class="empty">로봇 명패 수신 대기…</div>';
 

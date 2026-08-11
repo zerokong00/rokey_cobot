@@ -109,6 +109,12 @@ function makeRobot(spec) {
     defectRows: new Map(),  // defect_id → 리포트 dict
     marks: [],              // 3D 맵 마커 {id, s, clock, repaired}
     maxS: 0,                // 지나간 최대 호길이 (m)
+    // 진행시간 — **규약에 없는 값이라 여기서 만든다.** drive_state 에는 그
+    // 순간의 `stamp` 만 있고 "언제 시작했나" 가 없다.
+    // 🔑 기준 시계는 **로봇이 보내온 stamp** 다(브라우저 시계가 아니라). 두
+    //    시계가 어긋나도, 브라우저를 늦게 열어도 같은 값이 나온다.
+    t0: null,               // 이번 판이 실제로 뜬 시각(stamp, s). null = 아직
+    elapsedS: 0,            // 진행시간(s). DONE 에서 멈춘다
     run: null,              // 시연 판 번호 (서버가 센다). 바뀌면 = 재시작
     cam: {front: null, torch: null},   // {blob, t, fps} (rear 는 v1_3 에서 폐지)
   };
@@ -188,6 +194,7 @@ function setRoster(d) {
 function resetRobot(r, why) {
   r.state = null;
   r.maxS = 0;
+  r.t0 = null; r.elapsedS = 0;
   r.marks.length = 0;
   r.defectRows.clear();
   for (const k of Object.keys(r.cam)) r.cam[k] = null;
@@ -245,9 +252,24 @@ function onState(r, d) {
   if (d.run !== undefined && r.run !== null && d.run !== r.run) {
     r.maxS = 0;
     r.marks.length = 0;
+    r.t0 = null; r.elapsedS = 0;
     bus.emit('reset', r, d.run);
   }
   if (d.run !== undefined) r.run = d.run;
+  // ── 진행시간 ────────────────────────────────────────────────
+  // 🔑 **안착(SETTLE)은 안 센다.** 피스톤이 관벽을 잡는 과도 구간은 임무가
+  //    아니라 준비다 — 여기까지 세면 "얼마나 돌았나" 가 판마다 들쭉날쭉해진다.
+  // 🔑 DONE 에서 **멈춘다.** 안 멈추면 끝난 임무의 시간이 계속 올라가서,
+  //    화면만 보고는 아직 돌고 있는 줄 안다.
+  // 🚨 멈추는 시점은 **DONE 을 처음 받은 그 값까지**다. `d.state !== 'DONE'`
+  //    로 거르면 마지막 주행 표본에서 얼어붙어 완료 순간이 통째로 빠진다.
+  //    여기서 `r.state` 는 아직 **직전** 상태라(대입은 아래에서 한다) 그것만
+  //    보면 새 필드 없이 "이번 것까지 반영하고 다음부터 멈춤" 이 된다.
+  if (typeof d.stamp === 'number') {
+    if (r.t0 === null && d.state && d.state !== 'SETTLE') r.t0 = d.stamp;
+    if (r.t0 !== null && (r.state || {}).state !== 'DONE')
+      r.elapsedS = Math.max(0, d.stamp - r.t0);
+  }
   // 카메라 분기가 바뀌면 지난 역할의 프레임은 바로 놓는다 — 화면(카메라 칸)이
   // 떠 있지 않아도 store 는 계속 받으므로, 여기서 버려야 실제로 안 쌓인다.
   if (d.cam && d.cam !== (r.state || {}).cam) dropOtherCams(r, d.cam);
