@@ -76,6 +76,25 @@ REVERSE = "--reverse" in sys.argv
 #    관찰용 런에서 카메라가 한 대도 안 생겨 "카메라가 다 죽은" 것처럼
 #    보였다(실측). 순수 주행 시험만 할 때 `--nocam` 으로 끈다.
 CAMERAS = "--nocam" not in sys.argv
+# 🎯 **검출 창** (`--detect`) — 전방 카메라 프레임에 센터링·관경 링·결함
+#    검출을 그려 OpenCV 창으로 띄운다(2026-08-11 사용자 요청: YOLO 처럼
+#    화면으로 직접 보고 싶다). 판정은 동연 `detect/finders.py`(= 네 원본
+#    검출 함수의 모듈판)를 그대로 쓴다 — 화면용으로 새로 만들지 않는다.
+DETECT_WIN = "--detect" in sys.argv
+# 🎥 **관 밖 관찰 카메라** (`--obs`, 2026-08-11 사용자: 영상 촬영용).
+#    로봇에 붙지 않는 **고정 카메라** 2대 — 단절 끝과 곡관을 밖에서 본다.
+#    `--glass2` 와 함께 쓸 것(배관·건물이 비쳐야 관 안이 보인다).
+# 뷰포트 카메라 좌표를 3초마다 로그에 찍는다(VIEW_LOG=0 으로 끔).
+VIEW_LOG = os.environ.get("VIEW_LOG", "1") == "1"
+# 결함 테두리가 이보다 가까워야 **진짜 벽면 구멍**이다(관 저 끝은 0.3~0.5m).
+DETECT_NEAR_M = float(os.environ.get("DETECT_NEAR_M", 0.22))
+# 결함이 이 거리 안에 들어와야 화면에 표시한다(사용자: 담길 만한 거리부터).
+DETECT_RANGE_M = float(os.environ.get("DETECT_RANGE_M", 0.30))
+# 단절 판정 문턱 — 무효 화소 비율 / 전방 거리(설계 문서 8.2·detector 규약)
+DETECT_INV_MAX = float(os.environ.get("DETECT_INV_MAX", 0.02))
+DETECT_STOP_M = float(os.environ.get("DETECT_STOP_M", 0.10))
+# 단절관이 카메라에 담기기 시작하는 진행거리(m) — 사용자 실측 2350mm
+DETECT_DEAD_S = float(os.environ.get("DETECT_DEAD_S", 2.350))
 # 기본은 **all** — 코스 3개에 로봇 3대를 동시에 굴린다.
 COURSE = "all"
 if "--course" in sys.argv:
@@ -87,7 +106,7 @@ if "--steps" in sys.argv:
 #    플래그가 **조용히 무시된다** — `--know-defect` 를 줬는데 아무 일도 안
 #    일어난 사고가 실제로 있었다. 모르는 `--` 인자는 여기서 잘라낸다.
 _KNOWN = {"--headless", "--hold", "--course",
-          "--steps", "--reverse", "--cam", "--nocam"}
+          "--steps", "--reverse", "--cam", "--nocam", "--glass2", "--detect"}
 _bad = [a for i, a in enumerate(sys.argv[1:], 1)
         if a.startswith("--") and a not in _KNOWN]
 if _bad:
@@ -867,8 +886,14 @@ _pm.CreateRestitutionAttr(0.0)
 #    로봇을 보기엔 좋지만, 용접 카메라처럼 **관 안에서 보는 시점**에서는
 #    벽 너머가 다 비쳐 결함·용접봉이 묻힌다. floor2 는 실제 배수관처럼
 #    불투명 PVC, floor1(T 자 관찰용)은 유리 유지.
-PVC_FLOORS = {x for x in os.environ.get("PVC_FLOORS", "floor2").split(",")
-              if x}
+# 🎯 floor2 **유리 모드** (`--glass2`) — v1_2 에서 `--glass` 로 돌렸을 때의
+#    그 유리 그대로(회백 0.55/0.58/0.60 · 투명도 0.25 · 거칠기 0.4).
+#    기본은 PVC(불투명)다 — 용접 카메라는 관 **안**에서 보므로 벽이 비치면
+#    결함이 묻힌다. 관 **밖**에서 용접 장면을 통째로 볼 때 이 모드를 쓴다.
+GLASS2 = "--glass2" in sys.argv
+PVC_FLOORS = (set() if GLASS2 else
+              {x for x in os.environ.get("PVC_FLOORS", "floor2").split(",")
+               if x})
 # 성능 노브 — 유리(투과)는 RTX 에서 비싸다. PIPE_GLASS=0 이면 불투명 회색.
 PIPE_GLASS = os.environ.get("PIPE_GLASS", "1") == "1"
 # 진단용 — 유리 재질 바인딩 자체를 뺀다(물리 재질 덮어쓰기 혐의 검증)
@@ -907,13 +932,36 @@ _ps.CreateInput("metallic", Sdf.ValueTypeNames.Float).Set(0.0)
 _pvc.CreateSurfaceOutput().ConnectToSource(_ps.ConnectableAPI(), "surface")
 
 
+# floor2 유리 모드 전용 재질 — v1_2 값 그대로. floor1 유리는 그 뒤 "거의
+#    완전 투명"(0.06)으로 따로 조정했으므로 값을 공유하지 않는다.
+_gl2 = UsdShade.Material.Define(stage, "/World/Glass2")
+_g2s = UsdShade.Shader.Define(stage, "/World/Glass2/Shader")
+_g2s.CreateIdAttr("UsdPreviewSurface")
+_g2s.CreateInput("diffuseColor", Sdf.ValueTypeNames.Color3f).Set(
+    Gf.Vec3f(*[float(x) for x in os.environ.get(
+        "GLASS2_COLOR", "0.55,0.58,0.60").split(",")]))
+_g2s.CreateInput("opacity", Sdf.ValueTypeNames.Float).Set(
+    float(os.environ.get("GLASS2_OPACITY", 0.10)))
+_g2s.CreateInput("roughness", Sdf.ValueTypeNames.Float).Set(0.4)
+# 🚨 투명도 0.25(v1_2 값)는 **배수구에서 안 통한다** — 그 자리엔 라이저
+#    관벽·거름망 하우징·바닥 슬래브가 겹쳐 25% 가 세 겹이면 거의 불투명이
+#    된다(사용자: "저 부분만 로봇이 안 보인다"). 0.10 이면 겹쳐도 비친다.
+# 굴절은 뺀다(2026-08-11 사용자: 굴절 때문에 관찰이 어렵다). v1_2 그대로가
+# 좋으면 GLASS2_IOR=1.5.
+_g2s.CreateInput("ior", Sdf.ValueTypeNames.Float).Set(
+    float(os.environ.get("GLASS2_IOR", 1.0)))
+_gl2.CreateSurfaceOutput().ConnectToSource(_g2s.ConnectableAPI(), "surface")
+
+
 def pipe_mat(path_or_name):
     """그 층 배관에 쓸 재질 — PVC_FLOORS 에 든 층은 PVC, 나머지는 유리."""
+    _f2 = ("/floor2/" in str(path_or_name)
+           or str(path_or_name) == "floor2")
     for _f in PVC_FLOORS:
         if _f and (f"/{_f}/" in str(path_or_name)
                    or str(path_or_name) == _f):
             return _pvc
-    return _gl
+    return _gl2 if (GLASS2 and _f2) else _gl
 
 # ── 배관 적재 — **건물 1회 참조** (v1_3) ────────────────────────────
 print("=" * 78)
@@ -1175,6 +1223,15 @@ for p in meshes:
                   f"{_sz[2] * 1000:.0f})mm  바닥위 "
                   f"{_h_lo * 1000:.0f}~{_h_hi * 1000:.0f}mm")
     # ⑤ 바인딩 (기본 = 벽)
+    # 🎯 `--glass2` 는 **그 층 건물까지 유리**로 만든다 (2026-08-11 사용자:
+    #    로봇이 샤워 거름망 **밖으로 나오는 장면**을 찍고 싶다 — 바닥·하우징이
+    #    불투명이면 탈출 순간이 통째로 가린다). 집기·바닥·천장 서브셋도
+    #    같은 재질로 덮어 층 전체가 비쳐 보이게 한다.
+    if GLASS2 and _who == "floor2":
+        UsdShade.MaterialBindingAPI.Apply(p).Bind(
+            _gl2, bindingStrength=UsdShade.Tokens.strongerThanDescendants)
+        print(f"[페인트] {_who}: --glass2 — 건물 셸도 유리(탈출 촬영용)")
+        continue
     UsdShade.MaterialBindingAPI.Apply(p).Bind(_MAT_WALL)
     _subset_bind(_bm, "paint_pipes", np.flatnonzero(_is_pipe),
                  pipe_mat(_who))          # 층별 유리/PVC
@@ -2123,7 +2180,11 @@ try:
             #    NAV=blueprint 는 도면으로 달리므로 주행에 영상이 필요 없다 —
             #    카메라는 관찰·웹 표시용이고, 결함이 있는 층은 용접 카메라가
             #    그 역할을 한다. 로봇당 정확히 1대 = 렌더 1대.
-            if fwd and _WELD_SITES.get(r["name"]) and NAV != "vision":
+            # 🚨 **전방 카메라 비활성** (2026-08-11 사용자 지시 — 용접
+            #    카메라를 되살리면서 전방은 끈다. 리소스 절약).
+            #    되살리려면 `FRONT_CAM=1`. 코드는 그대로 둔다.
+            if fwd and os.environ.get("FRONT_CAM", "0") != "1" \
+                    and NAV != "vision":
                 continue
             if not stage.GetPrimAtPath(f"{r['path']}/{seg}").IsValid():
                 continue
@@ -2173,7 +2234,9 @@ try:
             _ncam += 1
     # ── 🔧 토치 카메라 (v1_3, 동연 계층) — 용접링에 달아 토치가 미는
     #    방향(링 로컬 +Z = 토치 신장축)을 본다. ALIGN~ARC 동안의 활성 카메라.
-    for r in robots:
+    # 🎯 **용접 카메라 활성** (2026-08-11 사용자 지시로 복원). 끄려면
+    #    `WELD_CAM=0`.
+    for r in (robots if os.environ.get("WELD_CAM", "1") == "1" else []):
         _wr = TUNE.get("weld_ring_link")
         if not _wr:
             continue
@@ -2454,6 +2517,224 @@ def aim_weld_cam(r, tip_world=None, diag=False):
               f"{_ang:.1f}° (0 이면 정확히 겨눔)")
 
 
+# ── 🔍 검출 창 (--detect) ────────────────────────────────────────────
+try:
+    import cv2                                             # noqa: E402
+except ImportError:
+    cv2 = None
+_DETW = {"n": 0, "on": DETECT_WIN and not HEADLESS and cv2 is not None,
+         "path": "/dev/shm/cobot3_detect.jpg",
+         "tmp": "/dev/shm/cobot3_detect_tmp.jpg"}
+if _DETW["on"]:
+    print(f"[준비] 🔍 검출 프레임 → {_DETW['path']} (10Hz) — 볼 때:\n"
+          f"         python3 {SON}/tools/detect_view.py")
+
+
+def detect_window(r):
+    """전방 카메라 프레임 + 검출 오버레이를 창으로 띄운다."""
+    if not _DETW["on"]:
+        return
+    _c = r.get("cams", {}).get("front") or r.get("cams", {}).get("torch")
+    if _c is None:
+        return
+    try:
+        _im = _c.get_rgba()
+        if _im is None or not getattr(_im, "size", 0):
+            return
+        img = np.ascontiguousarray(np.asarray(_im)[:, :, :3].astype(np.uint8))
+        img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+        h, w = img.shape[:2]
+        cx0, cy0 = w // 2, h // 2
+        # ① 화면 중앙 십자 — 카메라 광축
+        cv2.line(img, (cx0 - 14, cy0), (cx0 + 14, cy0), (90, 90, 90), 1)
+        cv2.line(img, (cx0, cy0 - 14), (cx0, cy0 + 14), (90, 90, 90), 1)
+        # ② 관경 추적 링 (θ=50° 등거리 어안 → 화면 반경 f·θ)
+        _rr = int(F_PX * math.radians(50.0))
+        cv2.circle(img, (cx0, cy0), _rr, (200, 160, 60), 1)
+        cv2.putText(img, "bore ring", (cx0 + _rr - 60, cy0 - 6),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.38, (200, 160, 60), 1)
+        # ③ 센터링 — 개구(관 저 끝) 중심: 가장 어두운 큰 덩어리
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        _thr = max(12, int(np.percentile(gray, 8)))
+        _m = (gray <= _thr).astype(np.uint8)
+        _n, _lab, _st, _ce = cv2.connectedComponentsWithStats(_m, 8)
+        _best = None
+        for i in range(1, _n):
+            if _st[i, cv2.CC_STAT_AREA] < 300:
+                continue
+            if _best is None or _st[i, cv2.CC_STAT_AREA] > _st[_best,
+                                                               cv2.CC_STAT_AREA]:
+                _best = i
+        if _best is not None:
+            ax, ay = int(_ce[_best][0]), int(_ce[_best][1])
+            cv2.circle(img, (ax, ay), 9, (60, 220, 60), 2)
+            cv2.arrowedLine(img, (cx0, cy0), (ax, ay), (60, 220, 60), 2,
+                            tipLength=0.2)
+            _inc = math.degrees(math.hypot(ax - cx0, ay - cy0) / F_PX)
+            _clk = math.degrees(math.atan2(ay - cy0, ax - cx0))
+            cv2.putText(img, f"center err {_inc:.1f}deg @{_clk:+.0f}",
+                        (8, h - 28), cv2.FONT_HERSHEY_SIMPLEX, 0.45,
+                        (60, 220, 60), 1)
+        # ④ 결함 검출 — 동연 finders (키워드 인자 필수)
+        if _DY_FINDERS is not None:
+            # 🚨 **Depth 를 반드시 넘긴다** (2026-08-11 실측: 없으면 관 저 끝을
+            #    결함으로 오검해 발견 전부터 박스가 뜬다). finders 주석 그대로
+            #    — 벽면 구멍은 테두리가 근접 벽(≈0.1m), 관 저 끝은 0.3~0.5m 다.
+            _dep = None
+            try:
+                _fr = _c.get_current_frame()
+                _dep = _fr.get("distance_to_camera")
+            except Exception:
+                _dep = None
+            try:
+                _hole = _DY_FINDERS.find_wall_hole(
+                    np.asarray(_im)[:, :, :3].astype(np.uint8),
+                    expect_px=None, depth=_dep)
+            except Exception:
+                _hole = None
+            # 🎯 깊이 판정을 **통과한 것만** 그린다 (사용자: 발견 전에는
+            #    출력되지 않게). 깊이가 없으면 아예 안 그린다.
+            if _hole and (_dep is None or _hole.get("rim_m", 9.9)
+                          > DETECT_NEAR_M):
+                _hole = None
+            if _hole:
+                _hx, _hy = int(_hole["cx"]), int(_hole["cy"])
+                _hr = max(6, int(_hole.get("r_eq_px", 8)))
+                cv2.circle(img, (_hx, _hy), _hr + 4, (0, 80, 255), 2)
+                cv2.rectangle(img, (_hx - _hr - 6, _hy - _hr - 6),
+                              (_hx + _hr + 6, _hy + _hr + 6), (0, 80, 255), 1)
+                cv2.putText(img, f"DEFECT {_hole['area_px']:.0f}px",
+                            (_hx - _hr, _hy - _hr - 10),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 80, 255), 2)
+        # ⑤ 결함 표시 — **월드 좌표 투영** (2026-08-11 사용자 선택 2번).
+        #    `find_wall_hole` 은 "밝은 벽에 둘러싸인 **어두운 덩어리**" 를
+        #    찾는데, 우리 결함은 관벽에 붙은 **빨간 원반**이고 전방 카메라는
+        #    관 축을 보므로 늘 극단적으로 비스듬히(거의 선으로) 잡힌다 —
+        #    그래서 한 번도 안 걸렸다(사용자 지적). blueprint 는 결함 좌표를
+        #    아니까 **직접 투영**하고, 거리·화각으로 표시 여부를 가른다.
+        _cp7 = wpos(r["cam_prim"]) if r.get("cam_prim") is not None else None
+        if _cp7 is not None:
+            _Rc7 = wrot(r["cam_prim"])
+            _vw7 = _Rc7 @ np.array([0.0, 0.0, -1.0])   # 시선
+            _rw7 = _Rc7 @ np.array([1.0, 0.0, 0.0])
+            _uw7 = _Rc7 @ np.array([0.0, 1.0, 0.0])
+            for _sk in r.get("weld_sites", []):
+                _dp7 = _sk["pos"] + _sk["dir"] * PIPE_IR
+                _rel7 = _dp7 - _cp7
+                _dist = float(np.linalg.norm(_rel7))
+                if _dist > DETECT_RANGE_M:            # 아직 멀다 → 안 띄운다
+                    continue
+                _z7 = float(np.dot(_rel7, _vw7))
+                if _z7 <= 0.005:                      # 카메라 뒤 → 안 띄운다
+                    continue
+                # 어안 등거리 투영: 화면 반경 = f·θ
+                _x7 = float(np.dot(_rel7, _rw7))
+                _y7 = float(np.dot(_rel7, _uw7))
+                _th7 = math.atan2(math.hypot(_x7, _y7), _z7)
+                _ph7 = math.atan2(_y7, _x7)
+                _rr7 = F_PX * _th7
+                _px = int(cx0 + _rr7 * math.cos(_ph7))
+                _py = int(cy0 - _rr7 * math.sin(_ph7))
+                if not (0 <= _px < w and 0 <= _py < h):   # 화면 밖
+                    continue
+                _rad7 = max(7, int(F_PX * math.atan2(0.008, _dist)))
+                _col7 = ((0, 80, 255) if not _sk["done"] else (60, 200, 60))
+                cv2.circle(img, (_px, _py), _rad7 + 3, _col7, 2)
+                cv2.rectangle(img, (_px - _rad7 - 6, _py - _rad7 - 6),
+                              (_px + _rad7 + 6, _py + _rad7 + 6), _col7, 1)
+                _off7 = math.degrees(_th7)
+                cv2.putText(img,
+                            ("REPAIRED" if _sk["done"] else "DEFECT")
+                            + f" {_dist * 1000:.0f}mm  off {_off7:.0f}deg",
+                            (max(4, _px - _rad7 - 40), _py - _rad7 - 12),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.42, _col7, 1)
+                cv2.line(img, (cx0, cy0), (_px, _py), _col7, 1)
+
+        # ⑥ **단절 판정** (설계 문서 8.2 근거 그대로): 관이 끊기면 그 너머는
+        #    빈 공간이라 Depth 가 **무효(inf)** 로 돌아오고, 캡으로 막혔으면
+        #    **전방 거리가 급감**한다. 둘 다 여기서 직접 재서 띄운다
+        #    (2026-08-11 사용자: floor2 단절이 뷰어에 안 나온다).
+        _dz = None
+        try:
+            _dz = _c.get_current_frame().get("distance_to_camera")
+        except Exception:
+            _dz = None
+        if _dz is not None and getattr(_dz, "size", 0):
+            _d9 = np.asarray(_dz, dtype=np.float64)
+            _fin = np.isfinite(_d9) & (_d9 > 0)
+            _inv = 1.0 - float(_fin.mean())
+            # 전방 거리 = 화면 중앙 패치(±10%)의 중앙값
+            _hh, _ww = _d9.shape[:2]
+            _p9 = _d9[int(_hh * 0.4):int(_hh * 0.6),
+                      int(_ww * 0.4):int(_ww * 0.6)]
+            _pf = _p9[np.isfinite(_p9) & (_p9 > 0)]
+            _fr9 = float(np.median(_pf)) if _pf.size else 0.0
+            # 🚨 **전방 거리는 단절 신호가 아니다** (2026-08-11 실측):
+            #    주행 중에도 69~147mm 를 오가 100mm 문턱을 계속 넘나든다 —
+            #    관 안에서는 곡관·벽을 가까이 보는 게 정상이기 때문이다.
+            #    무효 화소 비율도 이 맵에서는 0.0% 로 안 뜬다(끝이 캡이라
+            #    Depth 가 유효하게 돌아온다).
+            # 🎯 → **아는 지형으로 못박는다** (blueprint 규약, 사용자 지시):
+            #    단절관이 시야에 들어오는 s≥DETECT_DEAD_S 부터만 경고한다.
+            _dis = (_inv > DETECT_INV_MAX
+                    or float(r.get("s_hint") or 0.0) >= DETECT_DEAD_S)
+            if os.environ.get("DETECT_DIAG") == "1" and _DETW["n"] % 20 == 0:
+                print(f"           [단절판정] 무효 {_inv * 100:5.1f}% "
+                      f"(문턱 {DETECT_INV_MAX * 100:.0f}) 전방 "
+                      f"{_fr9 * 1000:5.0f}mm (문턱 "
+                      f"{DETECT_STOP_M * 1000:.0f}) → "
+                      f"{'단절' if _dis else '정상'}")
+            cv2.putText(img, f"depth invalid {_inv * 100:.1f}%   "
+                             f"forward {_fr9 * 1000:.0f}mm",
+                        (8, h - 46), cv2.FONT_HERSHEY_SIMPLEX, 0.42,
+                        (200, 200, 90), 1)
+            if _dis:
+                cv2.rectangle(img, (0, 26), (w, 52), (0, 0, 140), -1)
+                cv2.putText(img, "!! DISCONNECTED / DEAD END !!",
+                            (int(w * 0.22), 45),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+
+        # ⑦ 상태 줄
+        _w9 = r.get("weld")
+        _st9 = _w9["st"] if _w9 else r.get("state", "")
+        _s9 = float(r.get("s_hint") or 0.0) * 1000.0
+        cv2.rectangle(img, (0, 0), (w, 22), (30, 30, 30), -1)
+        cv2.putText(img, f"{r['name']}  {_st9}  s={_s9:.0f}mm", (8, 15),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.45, (230, 230, 230), 1)
+        # 🚨 Isaac 내장 cv2 는 **headless 빌드**라 `imshow` 가 없다(실측:
+        #    "The function is not implemented ... Rebuild with GTK+").
+        #    tkinter·PyQt5 도 없다. → 프레임을 RAM 디스크에 쓰고 **별도
+        #    뷰어 프로세스**(시스템 python3, GUI cv2)가 띄운다.
+        # 🚨 임시파일도 **.jpg 확장자**여야 한다 — cv2 는 확장자로 인코더를
+        #    고르므로 ".tmp" 면 "could not find a writer" 로 실패한다(실측).
+        _ok, _buf = cv2.imencode(".jpg", img,
+                                 [int(cv2.IMWRITE_JPEG_QUALITY), 80])
+        if _ok:
+            with open(_DETW["tmp"], "wb") as _fh:
+                _fh.write(_buf.tobytes())
+            os.replace(_DETW["tmp"], _DETW["path"])
+            # 🎯 **웹으로도 보낸다** (2026-08-11 사용자 지시) — 동연 계층의
+            #    `opencv_debug` 토픽이 바로 이 용도다(판정 근거 시각화).
+            #    로컬 뷰어와 같은 그림이 웹 화면에도 그대로 뜬다.
+            _dy = r.get("dy_pub")
+            if _dy is not None and RB is not None:
+                try:
+                    from sensor_msgs.msg import CompressedImage as _CI8
+                    _m8 = _CI8()
+                    _m8.header.stamp = RB.node.get_clock().now().to_msg()
+                    _m8.header.frame_id = "detect"
+                    _m8.format = "jpeg"
+                    _m8.data = _buf.tobytes()
+                    _dy["debug"].publish(_m8)
+                except Exception:
+                    pass
+        _DETW["n"] += 1
+    except Exception as _de:
+        if _DETW["n"] == 0:
+            print(f"[경고] 검출 창 실패(끔): {_de}")
+        _DETW["on"] = False
+
+
 # ── ✨ 용접 스파크 (welder/spark_fx.py) ──────────────────────────────
 # 🎯 세기는 **초기값 쪽으로 낮춘다** (2026-08-11 사용자: 이전 강한 설정은
 #    용접 장면을 묻어버렸다. 크게 키웠던 이유였던 "멀어서 안 보임" 은 이제
@@ -2485,6 +2766,12 @@ if SPARK_RATE > 0 and not HEADLESS:
     except Exception as _se:
         print(f"[경고] 스파크 초기화 실패(무해): {_se}")
 
+# ── 🎥 관 밖 관찰 카메라 (--obs) ────────────────────────────────────
+# 🔑 좌표는 **코스에서 직접 계산**한다(하드코딩 아님): 단절 끝·지정 코너를
+#    코스 점에서 뽑고, 관에서 비스듬히 물러난 자리에 세워 그 지점을 겨눈다.
+# 🚨 시야 가림 방지: ① 관과 같은 높이가 아니라 **위로 130mm** 띄운다
+#    (바닥 슬래브·관 자체에 안 묻힌다) ② 방 안쪽(x 0.33~1.50, y 0.10~1.40)
+#    을 벗어나지 않게 잡는다 — 밖으로 나가면 복도 벽(유리 아님)이 가린다.
 tick("카메라·센서 준비 완료")
 
 # ── 🌐 웹 연결 (동민 ros_bridge — 규약 단일 출처 pipe_comm/contract.py) ──
@@ -2493,7 +2780,9 @@ tick("카메라·센서 준비 완료")
 # 수신: mission(시작·정지), cmd_vel. ROS_PUB=0 으로 끈다.
 RB = None
 _DY_FINDERS = None
-if os.environ.get("ROS_PUB", "1") == "1":
+# 🚨 **ROS 발행 기본 끔** (2026-08-11 사용자 지시 — 실측상 가장 비싸다:
+#    1.21x → 0.93x). 웹 연동이 필요할 때만 `ROS_PUB=1`.
+if os.environ.get("ROS_PUB", "0") == "1":
     sys.path.insert(0, str(SON.parent / "dongmin" / "isaac_bridge"))
     try:
         import ros_bridge as _rosb                        # noqa: E402
@@ -2503,12 +2792,22 @@ if os.environ.get("ROS_PUB", "1") == "1":
             from pipe_comm import contract as _ct         # noqa: E402
             for r in robots:
                 _rp = RB.robot(r["name"])
+                # 🚨 **토픽 호환** (2026-08-11): 인계 문서에는 floor2 가
+                #    `torch/rgb` 로 적혀 있는데 용접 카메라를 끄면서 전방
+                #    (`rgb`)으로 바뀌어 웹이 못 받았다(실측). 같은 영상을
+                #    **두 역할로 등록**해 어느 토픽을 구독하든 받게 한다 —
+                #    annotator 를 공유하므로 렌더 비용은 늘지 않는다.
                 for _role, _key in (("front", "front"),
-                                    ("torch", "torch")):
+                                    ("torch", "torch"),
+                                    ("torch", "front")):
                     _c = r.get("cams", {}).get(_key)
-                    if _c is not None:
-                        _rp.attach_cameras([(_c, CAM_W, CAM_H, F_PX)],
-                                           role=_role)
+                    if _c is None:
+                        continue
+                    if _role == "torch" and _key == "front" \
+                            and "torch" in r.get("cams", {}):
+                        continue          # 진짜 용접 카메라가 있으면 생략
+                    _rp.attach_cameras([(_c, CAM_W, CAM_H, F_PX)],
+                                       role=_role)
                 _cl0 = r["cl"]
                 # 웹 관 튜브용 표본 ~60개 (스트라이드 40은 4개뿐이라 튜브가
                 # 각졌다 — 실측)
@@ -4274,6 +4573,33 @@ while True:
     if step > STEPS and STEPS > 0 and not (HOLD and not HEADLESS):
         break
 
+    # ── 🎥 **뷰포트 카메라 좌표 로그** (VIEW_LOG=1, 기본 켜짐) ──────────
+    #    마우스로 원하는 각도를 잡아 두면 그 위치·시선이 3초마다 찍힌다.
+    #    그 숫자를 그대로 고정 관찰 카메라로 박으면 같은 구도가 재현된다
+    #    (2026-08-11 사용자 요청 — 사진으로 역산하면 오차가 크다).
+    if (not HEADLESS and VIEW_LOG
+            and step % int(3 * PHYSICS_HZ) == 0):
+        try:
+            from omni.kit.viewport.utility import get_active_viewport
+            _vp = get_active_viewport()
+            _cpz = stage.GetPrimAtPath(str(_vp.camera_path))
+            if _cpz and _cpz.IsValid():
+                _pz = wpos(_cpz)
+                _fz = wrot(_cpz) @ np.array([0.0, 0.0, -1.0])
+                _tg = {"단절끝": np.array([1.500, 0.600, 2.490]),
+                       "곡관": np.array([1.160, 1.360, 2.490]),
+                       "라이저": np.array([0.330, 0.850, 2.490])}
+                _near = min(_tg.items(),
+                            key=lambda kv: np.linalg.norm(kv[1] - _pz))
+                print(f"  [뷰포트] 위치 ({_pz[0]:+.3f}, {_pz[1]:+.3f}, "
+                      f"{_pz[2]:+.3f})  시선 ({_fz[0]:+.2f}, {_fz[1]:+.2f}, "
+                      f"{_fz[2]:+.2f})  가장 가까운 지점 {_near[0]} "
+                      f"{np.linalg.norm(_near[1] - _pz) * 1000:.0f}mm")
+        except Exception as _ve:
+            if not globals().get("_VIEWLOG_WARNED"):
+                globals()["_VIEWLOG_WARNED"] = True
+                print(f"[경고] 뷰포트 좌표 로그 불가: {_ve}")
+
     if step - _step_mark >= 5 * PHYSICS_HZ:
         _dt = time.time() - _t_mark
         _rate = (step - _step_mark) / max(_dt, 1e-9)
@@ -4377,6 +4703,8 @@ while True:
         # 🎥 **용접 카메라는 항상 팁을 본다** (2026-08-11 사용자 지시).
         #    주행 중에도 링 자세를 따라 돌므로, 링이 결함 쪽으로 돌면 화면도
         #    같이 돈다. 4스텝(60Hz)마다면 화면상 충분하다.
+        if _DETW["on"] and r["t"] % max(1, int(PHYSICS_HZ / 10)) == 0:
+            detect_window(r)
         if r.get("weld_cam") is not None and r["t"] % 4 == 0:
             aim_weld_cam(r, diag=(os.environ.get("WELD_CAM_DIAG") == "1"
                                   and r["t"] % int(2 * PHYSICS_HZ) == 0))
@@ -5180,7 +5508,10 @@ while True:
                 #    로봇당 1대뿐이라 "상황에 맞는 것만" 골라 봐야 의미가
                 #    없다. 있는 카메라를 **항상** 내보내고, 웹은 두 토픽을
                 #    계속 구독한다. `_role` 은 이제 보고용 이름일 뿐이다.
-                _role = next(iter(r.get("cams", {})), "front")
+                # 🎯 웹에는 **전방 카메라**를 뿌린다 (2026-08-11 사용자 지시 —
+                #    용접 카메라를 끈 지금 전방이 임무 시야다).
+                _role = ("front" if "front" in r.get("cams", {})
+                         else next(iter(r.get("cams", {})), "front"))
                 if r["dead"]:
                     _st9 = "DEAD"
                 elif _wst in ("ALIGN", "EXTEND"):
