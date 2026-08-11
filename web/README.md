@@ -183,8 +183,8 @@ ros2 run pipe_comm web_panel --ros-args -p ns:=robot -p port:=8080
 
 | 화면 | 출처 |
 |---|---|
-| 카메라 3대 | `rgb/compressed`, `rear/rgb/compressed`, `torch/rgb/compressed` → WS 바이너리 `[로봇번호, 채널 1/2/3]` |
-| 지금 켜진 카메라 | `drive_state` 의 `cam` (`front`/`rear`/`torch`) |
+| 카메라 (로봇당 1대) | `rgb/compressed`(전방) · `torch/rgb/compressed`(토치) → WS 바이너리 `[로봇번호, 채널 1/3]` (채널 2=rear 는 v1_3 에서 폐지) |
+| 지금 켜진 카메라 | `drive_state` 의 `cam` (`front`/`torch`) |
 | 지령 이력 | `POST /cmd` 를 서버가 기록 → WS `{"type":"cmd"}` (지금은 그리는 화면이 없다. `store.cmds` 에 쌓이고 서버 로그에도 남는다) |
 | 코스 중심선(관 튜브) | `course` 토픽(latched) → WS `{"type":"course"}` |
 | 층 정렬(z 오프셋) | `course.z_shift_mm`, 없으면 `.webmesh` 헤더 → `hello` |
@@ -304,17 +304,19 @@ Isaac GUI 에서 Stop→Play 로 시연을 다시 돌리면 `drive_state.step` �
 `SPEED` 지령 자체는 규약·시연에 그대로 있으니 필요하면
 `ros2 run pipe_comm mission_cli -- SPEED --mps 0.05` 로 보낼 수 있다.
 
-## 카메라는 한 번에 한 대만 켜진다
+## 카메라는 로봇당 한 대다 (v1_3)
 
-| 언제 | 켜지는 카메라 |
-|---|---|
-| 전진 주행 | `front` |
-| 후진·복귀 (`RETURN`/`RECOVER`) | `rear` |
-| 정렬~아크 (`ALIGN`/`EXTEND`/`ARC`) | `torch` |
+| 로봇 | 카메라 | 토픽 | 채널 |
+|---|---|---|---|
+| `floor1` | 전방 | `rgb/compressed` | 1 |
+| `floor2` | 토치(결함·용접부) | `torch/rgb/compressed` | 3 |
 
-분기 규칙의 단일 출처는 시연의 `active_camera_name()` 이고, 시연은 그 한 대만
-발행한다(안 쓰는 카메라를 안 굽는 만큼 JPEG 인코딩 비용이 빠진다). 지금 켜진
-역할은 `drive_state.cam` 으로 온다.
+🚨 **v1_3 에서 rear(후방, 채널 2)는 폐지됐다.** 예전엔 주행 방향에 따라
+front/rear/torch 로 갈아 끼웠지만, 지금은 **로봇마다 자기 역할 한 대만 항상
+10Hz 로 발행**한다(floor1 전방 고정 / floor2 토치 고정). 지금 켜진 역할은
+`drive_state.cam` 으로 오고, 화면은 그 값을 그대로 따라간다 — 층별 매핑을
+web 에 하드코딩하지 않는다. 채널 번호는 재사용하지 않아(2 는 비워 둔다)
+`web_panel.py` 의 `CAM_CH` 와 `app.js` 의 `CH` 가 그대로 맞는다.
 
 🔑 **화면도 한 칸만 만든다.** 예전에는 3칸을 나란히 두고 둘은 늘 "대기" 였는데,
 안 쓰는 칸이 마지막 프레임을 **디코딩된 채로** 붙들고 있었다(브라우저는

@@ -112,7 +112,11 @@ DEFECT_REPORT_TOPIC = "/" + DEFECT_REPORT_REL
 # 🔑 로봇이 늘면서 1 바이트로는 모자라졌다. 번호는 `hello` 가 알려 주는
 #    `idx`(1부터, ns 목록 순서)이고 채널은 아래 CAM_CH 다.
 #    web/app.js 의 CH·onFrame 과 **같이** 고칠 것.
-CAM_CH = {"front": 1, "rear": 2, "torch": 3}
+# 🚨 v1_3 에서 **rear(후방, 채널 2)는 폐지**됐다 — floor1 전방 / floor2 토치
+#    2대만 발행한다. 채널 번호는 재사용하지 않는다(2 는 비워 둔다) — 옛
+#    브라우저와 섞여도 어긋나지 않게. 규약(contract.Topics.rear_rgb)은 되살릴
+#    때를 위해 그대로 남아 있다.
+CAM_CH = {"front": 1, "torch": 3}
 
 
 def mesh_z_shift(data):
@@ -428,13 +432,11 @@ class PanelNode(Node):
             self.create_subscription(
                 UInt8MultiArray, t.mesh, lambda m, r=r: self._on_mesh(m, r),
                 contract.latched_qos())
-            # 카메라 3대 — 한 번에 한 대만 발행된다(시연의 active_camera_name)
+            # 카메라 — v1_3 은 로봇당 1대만 발행한다(floor1 전방 / floor2 토치).
+            # 둘 다 항상 10Hz. rear 는 폐지돼 구독을 지웠다(위 CAM_CH 참고).
             self.create_subscription(
                 CompressedImage, t.rgb,
                 lambda m, r=r: r.set_cam("front", bytes(m.data)), sq)
-            self.create_subscription(
-                CompressedImage, t.rear_rgb,
-                lambda m, r=r: r.set_cam("rear", bytes(m.data)), sq)
             self.create_subscription(
                 CompressedImage, t.torch_rgb,
                 lambda m, r=r: r.set_cam("torch", bytes(m.data)), sq)

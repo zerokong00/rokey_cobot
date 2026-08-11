@@ -110,7 +110,7 @@ function makeRobot(spec) {
     marks: [],              // 3D 맵 마커 {id, s, clock, repaired}
     maxS: 0,                // 지나간 최대 호길이 (m)
     run: null,              // 시연 판 번호 (서버가 센다). 바뀌면 = 재시작
-    cam: {front: null, rear: null, torch: null},   // {blob, t, fps}
+    cam: {front: null, torch: null},   // {blob, t, fps} (rear 는 v1_3 에서 폐지)
   };
 }
 
@@ -225,7 +225,9 @@ export function showFrame(img, r, role) {
 }
 
 // ── 웹소켓 ───────────────────────────────────────────────────
-const CH = {1: 'front', 2: 'rear', 3: 'torch'};   // web_panel.py 의 CAM_CH
+// web_panel.py 의 CAM_CH 와 맞춘다. 채널 2(rear)는 v1_3 에서 폐지 — 번호는
+// 재사용하지 않는다(들어와도 role 이 undefined 라 onFrame 이 조용히 버린다).
+const CH = {1: 'front', 3: 'torch'};
 const connEl = document.getElementById('conn');
 function setConn(ok, msg) {
   store.connected = ok;

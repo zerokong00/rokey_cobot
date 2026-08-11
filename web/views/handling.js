@@ -17,8 +17,7 @@ import {store, bus, cmd, robotCols} from '/static/app.js';
 import {mountCam} from '/static/views/camera.js';
 import {mountLog} from '/static/views/events.js';
 
-const CAM_WHEN = {front: '전진 — 전방', rear: '후진·복귀 — 후방',
-                  torch: '정렬~용접 — 토치'};
+const CAM_WHEN = {front: '전방 — 주행', torch: '토치 — 결함·용접부'};
 
 /** 지령 한 발. 결과를 toast 에 적는다(로봇별·전체 공용). */
 async function send(toast, c, extra) {
